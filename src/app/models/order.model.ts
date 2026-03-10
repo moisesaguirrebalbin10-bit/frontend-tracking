@@ -1,0 +1,71 @@
+export interface Order {
+  id: number;
+  external_id: string;
+  status: OrderStatus;
+  total: number;
+  customer_name: string;
+  customer_email?: string;
+  customer_phone?: string;
+  // 'source' is not provided by API; we'll infer it client-side
+  source?: 'web' | 'redes';
+  delivery_location?: string;
+  delivery_coordinates?: {
+    lat: number;
+    lng: number;
+  };
+  delivery_date?: string;
+  error_reason?: string;
+  delivery_image_path?: string;
+  meta: any; // JSON from WooCommerce
+  items?: OrderItem[];
+  created_at: string;
+  updated_at: string;
+  timelines?: OrderTimeline[];
+  logs?: OrderLog[];
+  user_id?: number;
+  user?: {
+    id: number;
+    name: string;
+    role: string;
+  };
+}
+
+export interface OrderItem {
+  id: number;
+  product_name: string;
+  quantity: number;
+  price: number;
+  image_url?: string;
+}
+
+export enum OrderStatus {
+  EN_PROCESO = 'EN_PROCESO',
+  EMPAQUETADO = 'EMPAQUETADO',
+  DESPACHADO = 'DESPACHADO',
+  EN_CAMINO = 'EN_CAMINO',
+  ENTREGADO = 'ENTREGADO',
+  ERROR = 'ERROR',
+  CANCELADO = 'CANCELADO'
+}
+
+export interface OrderTimeline {
+  id: number;
+  order_id: number;
+  status: OrderStatus;
+  message: string;
+  source: string;
+  occurred_at: string;
+}
+
+export interface OrderLog {
+  id: number;
+  order_id: number;
+  user_id?: number;
+  action: string;
+  old_status?: OrderStatus;
+  new_status?: OrderStatus;
+  description: string;
+  changes: any; // JSON
+  ip_address: string;
+  created_at: string;
+}
