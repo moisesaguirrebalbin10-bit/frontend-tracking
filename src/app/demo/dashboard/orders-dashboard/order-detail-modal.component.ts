@@ -47,7 +47,8 @@ import { OrderService } from '../../../services/order.service';
                   </span>
                   <span *ngIf="!order.delivery_coordinates">N/A</span>
                 </p>
-                <p><strong>Fecha de Entrega:</strong> {{ order.delivery_date ? (order.delivery_date | date: 'short') : 'N/A' }}</p>
+                <p><strong>Fecha Estimada de Entrega:</strong> {{ order.estimated_delivery_date ? formatEstimated(order.estimated_delivery_date) : 'N/A' }}</p>
+                <p><strong>Fecha Real de Entrega:</strong> {{ order.delivery_date ? (order.delivery_date | date: 'short') : 'N/A' }}</p>
               </div>
             </div>
 
@@ -185,6 +186,17 @@ export class OrderDetailModalComponent implements OnChanges {
       'CANCELADO': 'Cancelado'
     };
     return labels[status] || status;
+  }
+
+  // helper para fechas estimadas en modal
+  formatEstimated(date: string): string {
+    if (!date) return 'N/A';
+    if (date.includes(' y ')) return date;
+    const d = new Date(date);
+    if (!isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat('es-PE', { dateStyle: 'short' }).format(d);
+    }
+    return date;
   }
 
   close() {

@@ -203,7 +203,7 @@ export class OrdersDashboardComponent implements OnInit {
     return Math.ceil(((+d - +yearStart) / 86400000 + 1) / 7);
   }
 
-  getOrderSource(order: Order): 'web' | 'redes' | null {
+  getOrderSource(order: Order): 'web' | 'redes' | 'woocommerce' | null {
     if (order.source) {
       return order.source;
     }
@@ -215,7 +215,7 @@ export class OrdersDashboardComponent implements OnInit {
       return 'web';
     }
     if (!order.user) {
-      return 'redes';
+      return 'woocommerce';
     }
     return null;
   }

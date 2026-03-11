@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { Order, OrderStatus, OrderTimeline, OrderLog } from '../models/order.model';
+import { WooCommerceService, WooCommerceOrder, WooCommerceOrdersResponse } from './woocommerce.service';
 
 export interface OrdersResponse {
   data: Order[];
@@ -17,7 +18,10 @@ export interface OrdersResponse {
 export class OrderService {
   private apiUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private wooCommerceService: WooCommerceService
+  ) {}
 
   getOrders(page: number = 1, perPage: number = 50): Observable<OrdersResponse> {
     const params = new HttpParams()
@@ -65,5 +69,128 @@ export class OrderService {
 
   syncOrders(): Observable<any> {
     return this.http.post(`${this.apiUrl}/orders/sync`, {});
+  }
+
+  /**
+   * Get WooCommerce orders
+   */
+  getWooCommerceOrders(page: number = 1, perPage: number = 20): Observable<WooCommerceOrdersResponse> {
+    return this.wooCommerceService.getOrders(page, perPage);
+  }
+
+  /**
+   * Get a single WooCommerce order
+   */
+  getWooCommerceOrder(id: number | string): Observable<WooCommerceOrder> {
+    return this.wooCommerceService.getOrder(id);
+  }
+
+  /**
+   * Transform WooCommerce order to internal Order format
+   */
+  transformWooCommerceOrder(wooOrder: WooCommerceOrder, storeName: string = 'WooCommerce'): Order {
+    const customerName = `${wooOrder.billing?.first_name || ''} ${wooOrder.billing?.last_name || ''}`.trim();
+    
+    return {
+      id: wooOrder.id,
+      external_id: wooOrder.order_number || String(wooOrder.id),
+      status: this.mapWooCommerceStatus(wooOrder.status),
+      total: parseFloat(wooOrder.total) || 0,
+      customer_name: customerName || 'Sin nombre',
+      customer_email: wooOrder.billing?.email,
+      customer_phone: wooOrder.billing?.phone,
+      source: 'woocommerce',
+      delivery_location: (() => {
+        
+        const shipping = `${wooOrder.shipping?.address_1 || ''} ${wooOrder.shipping?.city || ''}`.trim();
+        if (shipping) return shipping;
+        const billing = `${wooOrder.billing?.address_1 || ''} ${wooOrder.billing?.city || ''}`.trim();
+        return billing || '-';
+      })(),
+      
+      delivery_coordinates: (() => {
+        // lat/lng puede aparecer bajo varias claves de meta_data (shipping o custom billing)
+        const meta = wooOrder['meta_data'];
+        if (Array.isArray(meta)) {
+          const latMeta = meta.find(m =>
+            m.key === '_shipping_latitude' ||
+            m.key === 'shipping_latitude' ||
+            m.key === '_billing_cordenada_latitud'
+          );
+          const lngMeta = meta.find(m =>
+            m.key === '_shipping_longitude' ||
+            m.key === 'shipping_longitude' ||
+            m.key === '_billing_cordenada_longitud'
+          );
+          const lat = latMeta?.value;
+          const lng = lngMeta?.value;
+          if (lat && lng) {
+            return { lat: parseFloat(lat), lng: parseFloat(lng) };
+          }
+        }
+        return null;
+      })(),
+      delivery_date: (() => {
+        // Solo mostrar fecha de entrega si el estado es ENTREGADO
+        const status = this.mapWooCommerceStatus(wooOrder.status);
+        if (status === OrderStatus.ENTREGADO && wooOrder['date_completed']) {
+          return wooOrder['date_completed'];
+        }
+        return null;
+      })(),
+      estimated_delivery_date: (() => {
+        // extraer fecha estimada de entrega; puede venir como campo genérico o dos fechas billing
+        const meta = wooOrder['meta_data'];
+        if (Array.isArray(meta)) {
+          // buscar campo genérico primero
+          const deliveryMeta = meta.find(m =>
+            m.key === '_delivery_date' ||
+            m.key === 'delivery_date' ||
+            m.key === 'estimated_delivery_date' ||
+            m.key === '_estimated_delivery_date'
+          );
+          if (deliveryMeta?.value) {
+            return deliveryMeta.value;
+          }
+          // fall back a los campos billing fecha1/fecha2
+          const f1 = meta.find(m => m.key === '_billing_fecha_entrega_1')?.value;
+          const f2 = meta.find(m => m.key === '_billing_fecha_entrega_2')?.value;
+          if (f1 && f2) return `${f1} y ${f2}`;
+          if (f1) return f1;
+        }
+        return null;
+      })(),
+      created_at: wooOrder.date_created,
+      updated_at: wooOrder.date_created,
+      meta: wooOrder,
+      items: (wooOrder.line_items || []).map(item => ({
+        id: item.id,
+        product_name: item.name,
+        quantity: item.quantity,
+        price: parseFloat(item.price) || 0,
+        image_url: item.image?.src
+      })),
+      woo_source: storeName,
+      woo_status: wooOrder.status,
+      woo_order_number: wooOrder.order_number,
+      woo_order_id: wooOrder.id
+    };
+  }
+
+  /**
+   * Map WooCommerce status to internal OrderStatus
+   */
+  private mapWooCommerceStatus(wooStatus: string): OrderStatus {
+    const statusMap: { [key: string]: OrderStatus } = {
+      'pending': OrderStatus.EN_PROCESO,
+      'processing': OrderStatus.EN_PROCESO,
+      'on-hold': OrderStatus.EN_PROCESO,
+      'completed': OrderStatus.ENTREGADO,
+      'cancelled': OrderStatus.CANCELADO,
+      'refunded': OrderStatus.CANCELADO,
+      'failed': OrderStatus.ERROR
+    };
+
+    return statusMap[wooStatus] || OrderStatus.EN_PROCESO;
   }
 }

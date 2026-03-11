@@ -1,6 +1,7 @@
 import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { OrderService } from '../../../services/order.service';
+import { WooCommerceService, WooCommerceOrder } from '../../../services/woocommerce.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/order-detail-modal.component';
 
@@ -15,6 +16,20 @@ import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/orde
           <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
               <h5>Pedidos</h5>
+              <div class="btn-group me-3" role="group">
+                <button type="button" 
+                  class="btn btn-sm" 
+                  [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'"
+                  (click)="setDataSource('internal')">Internos</button>
+                <button type="button" 
+                  class="btn btn-sm" 
+                  [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'"
+                  (click)="setDataSource('woocommerce')">WooCommerce</button>
+                <button type="button" 
+                  class="btn btn-sm" 
+                  [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'"
+                  (click)="setDataSource('all')">Todos</button>
+              </div>
               <div class="btn-group" role="group">
                 <button type="button" 
                   class="btn btn-sm" 
@@ -38,11 +53,12 @@ import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/orde
                       <th>Nro Boleta</th>
                       <th>Nombre</th>
                       <th>Fecha</th>
-                      <th>Entrega</th>
+                      <th>Fecha de Entrega</th>
+                      <th>Fecha Entregado</th>
                       <th>Ubicación</th>
                       <th>Precio</th>
                       <th>Estado</th>
-                      <th>Vendedor</th>
+                      <th>Tienda/Vendedor</th>
                       <th>Acción</th>
                     </tr>
                   </thead>
@@ -51,7 +67,8 @@ import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/orde
                       <td>{{ order.external_id }}</td>
                       <td>{{ order.customer_name }}</td>
                       <td>{{ order.created_at | date: 'short' }}</td>
-                      <td>{{ order.delivery_date ? (order.delivery_date | date: 'short') : '-' }}</td>
+                      <td>{{ order.estimated_delivery_date ? formatEstimated(order.estimated_delivery_date) : '-' }}</td>
+                      <td>{{ order.status === 'ENTREGADO' && order.delivery_date ? (order.delivery_date | date:'short') : '-' }}</td>
                       <td>
                         <small>{{ order.delivery_location || '-' }}</small>
                       </td>
@@ -62,8 +79,9 @@ import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/orde
                         </span>
                       </td>
                       <td>
-                        <span class="badge" [ngClass]="order.source === 'web' ? 'bg-primary' : 'bg-info'">
-                          {{ order.source === 'web' ? 'Web' : 'Redes' }}
+                        <span class="badge" 
+                          [ngClass]="getSourceBadgeClass(order)">
+                          {{ getSourceDisplay(order) }}
                         </span>
                       </td>
                       <td>
@@ -131,45 +149,129 @@ export class OrdersListComponent implements OnInit {
   currentPage = signal(1);
   lastPage = signal(1);
   sourceFilter = signal<'web' | 'redes' | null>(null);
+  dataSource = signal<'internal' | 'woocommerce' | 'all'>('all');
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
   
   private readonly itemsPerPage = 50;
 
-  constructor(private orderService: OrderService) {}
+  constructor(
+    private orderService: OrderService,
+    private wooCommerceService: WooCommerceService
+  ) {}
 
   ngOnInit() {
     this.loadOrders();
   }
 
   loadOrders() {
+    const source = this.dataSource();
+    
+    if (source === 'internal') {
+      this.loadInternalOrders();
+    } else if (source === 'woocommerce') {
+      this.loadWooCommerceOrders();
+    } else {
+      this.loadAllOrders();
+    }
+  }
+
+  private loadInternalOrders() {
     this.loading.set(true);
     this.orderService.getOrders(this.currentPage(), this.itemsPerPage).subscribe({
       next: (response) => {
         let data = response.data;
         
-        console.log('Raw data from API:', data);
-        console.log('Source filter:', this.sourceFilter());
-
-        // Filter by source using user role
+        // Filter by source if needed
         if (this.sourceFilter()) {
-          data = data.filter(o => {
-            const src = this.getOrderSource(o);
-            console.log('Order', o.id, 'src', src, 'filter', this.sourceFilter());
-            return src === this.sourceFilter();
-          });
+          data = data.filter(o => this.getOrderSource(o) === this.sourceFilter());
         }
 
-        console.log('Filtered data:', data);
         this.orders.set(data);
         this.lastPage.set(response.last_page);
         this.loading.set(false);
+      },
+      error: (error) => {
+        console.error('Error loading internal orders', error);
+        this.loading.set(false);
+      }
+    });
+  }
+
+  private loadWooCommerceOrders() {
+    this.loading.set(true);
+    this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage).subscribe({
+      next: (response) => {
+        const transformedOrders = (response.data || []).map(wooOrder => 
+          this.orderService.transformWooCommerceOrder(wooOrder, 'WooCommerce')
+        );
+        
+        this.orders.set(transformedOrders);
+        this.lastPage.set(response.meta.total_pages);
+        this.loading.set(false);
+      },
+      error: (error) => {
+        console.error('Error loading WooCommerce orders', error);
+        this.loading.set(false);
+      }
+    });
+  }
+
+  private loadAllOrders() {
+    this.loading.set(true);
+    
+    // Load both internal and WooCommerce orders
+    this.orderService.getOrders(1, 1000).subscribe({
+      next: (internalResponse) => {
+        this.orderService.getWooCommerceOrders(1, 1000).subscribe({
+          next: (wooResponse) => {
+            let allOrders: Order[] = [...internalResponse.data];
+            
+            // Add transformed WooCommerce orders
+            const wooOrders = (wooResponse.data || []).map(wooOrder =>
+              this.orderService.transformWooCommerceOrder(wooOrder, 'WooCommerce')
+            );
+            
+            allOrders = [...allOrders, ...wooOrders];
+            
+            // Sort by date descending  
+            allOrders.sort((a, b) => 
+              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+            
+            // Apply source filter if needed
+            if (this.sourceFilter()) {
+              allOrders = allOrders.filter(o => this.getOrderSource(o) === this.sourceFilter());
+            }
+            
+            // Apply pagination client-side for mixed results
+            const start = (this.currentPage() - 1) * this.itemsPerPage;
+            const paginated = allOrders.slice(start, start + this.itemsPerPage);
+            
+            this.orders.set(paginated);
+            this.lastPage.set(Math.ceil(allOrders.length / this.itemsPerPage));
+            this.loading.set(false);
+          },
+          error: (error) => {
+            console.error('Error loading WooCommerce orders in combined view', error);
+            // Fall back to internal orders only
+            this.orders.set(internalResponse.data);
+            this.lastPage.set(internalResponse.last_page);
+            this.loading.set(false);
+          }
+        });
       },
       error: (error) => {
         console.error('Error loading orders', error);
         this.loading.set(false);
       }
     });
+  }
+
+  setDataSource(source: 'internal' | 'woocommerce' | 'all') {
+    this.dataSource.set(source);
+    this.currentPage.set(1);
+    this.loadOrders();
   }
 
   setSourceFilter(source: 'web' | 'redes' | null) {
@@ -189,15 +291,18 @@ export class OrdersListComponent implements OnInit {
     }
   }
 
-  viewOrder(order: Order) {
-    this.selectedOrder.set(order);
-    this.showModal.set(true);
-  }
-
-  closeModal() {
-    this.showModal.set(false);
-    this.selectedOrder.set(null);
-  }
+    // Formatea la fecha estimada, mostrando raw si no es un solo valor ISO
+    formatEstimated(date: string): string {
+      if (!date) return '-';
+      // rango detectado
+      if (date.includes(' y ')) return date;
+      // tratar de parsear
+      const d = new Date(date);
+      if (!isNaN(d.getTime())) {
+        return new Intl.DateTimeFormat('es-PE', { dateStyle: 'short' }).format(d);
+      }
+      return date;
+    }
 
   previousPage() {
     if (this.currentPage() > 1) {
@@ -220,8 +325,12 @@ export class OrdersListComponent implements OnInit {
     }
   }
 
-  getOrderSource(order: Order): 'web' | 'redes' | null {
-    // explicit source field still wins
+  getOrderSource(order: Order): 'web' | 'redes' | 'woocommerce' | null {
+    // WooCommerce orders
+    if (order.source === 'woocommerce') {
+      return 'woocommerce';
+    }
+    // explicit source field
     if (order.source) {
       return order.source;
     }
@@ -232,12 +341,48 @@ export class OrdersListComponent implements OnInit {
     if (role === 'ventas_web') {
       return 'web';
     }
-    // orders with no associated user come from webhook (WooCommerce) -> treat as redes
+    // orders with no associated user come from webhook (WooCommerce) -> treat as woocommerce
     if (!order.user) {
-      return 'redes';
+      return 'woocommerce';
     }
     // other roles (admin, delivery, etc.) are not classified
     return null;
+  }
+
+  getSourceDisplay(order: Order): string {
+    if (order.woo_source) {
+      return order.woo_source;
+    }
+    const source = this.getOrderSource(order);
+    switch (source) {
+      case 'web': return 'Web';
+      case 'redes': return 'Redes';
+      case 'woocommerce': return 'WooCommerce';
+      default: return order.user?.name || 'Desconocido';
+    }
+  }
+
+  getSourceBadgeClass(order: Order): string {
+    if (order.source === 'woocommerce' || (order.woo_source && !order.user)) {
+      return 'bg-warning';
+    }
+    if (order.source === 'web' || order.user?.role === 'ventas_web') {
+      return 'bg-primary';
+    }
+    if (order.source === 'redes' || order.user?.role === 'vendedor_redes') {
+      return 'bg-info';
+    }
+    return 'bg-secondary';
+  }
+
+  viewOrder(order: Order) {
+    this.selectedOrder.set(order);
+    this.showModal.set(true);
+  }
+
+  closeModal() {
+    this.showModal.set(false);
+    this.selectedOrder.set(null);
   }
 
   getPages(): (number | string)[] {

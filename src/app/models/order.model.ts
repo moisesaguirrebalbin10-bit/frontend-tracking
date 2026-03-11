@@ -7,13 +7,14 @@ export interface Order {
   customer_email?: string;
   customer_phone?: string;
   // 'source' is not provided by API; we'll infer it client-side
-  source?: 'web' | 'redes';
+  source?: 'web' | 'redes' | 'woocommerce';
   delivery_location?: string;
   delivery_coordinates?: {
     lat: number;
     lng: number;
   };
   delivery_date?: string;
+  estimated_delivery_date?: string; // Fecha estimada de entrega (de WooCommerce metadata)
   error_reason?: string;
   delivery_image_path?: string;
   meta: any; // JSON from WooCommerce
@@ -28,6 +29,11 @@ export interface Order {
     name: string;
     role: string;
   };
+  // WooCommerce specific fields
+  woo_source?: string; // Store name/url
+  woo_status?: string; // WooCommerce status (pending, processing, on-hold, completed, cancelled, refunded)
+  woo_order_number?: string;
+  woo_order_id?: number;
 }
 
 export interface OrderItem {
