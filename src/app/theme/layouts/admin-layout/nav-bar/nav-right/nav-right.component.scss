@@ -1,1 +1,16 @@
-// This file is intentionally left empty to allow customers to add custom CSS if needed.
+.logout-toast {
+	position: fixed;
+	top: 1rem;
+	right: 1rem;
+	z-index: 1085;
+	min-width: 320px;
+	max-width: 420px;
+}
+
+.logout-toast .toast {
+	box-shadow: 0 0.75rem 1.5rem rgba(0, 0, 0, 0.2);
+}
+
+.logout-toast .toast-header {
+	border-bottom: 0;
+}

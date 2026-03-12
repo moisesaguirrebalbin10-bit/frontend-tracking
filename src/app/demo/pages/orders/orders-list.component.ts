@@ -30,20 +30,6 @@ import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/orde
                   [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'"
                   (click)="setDataSource('all')">Todos</button>
               </div>
-              <div class="btn-group" role="group">
-                <button type="button" 
-                  class="btn btn-sm" 
-                  [ngClass]="sourceFilter() === null ? 'btn-primary' : 'btn-outline-primary'"
-                  (click)="setSourceFilter(null)">Todos</button>
-                <button type="button" 
-                  class="btn btn-sm" 
-                  [ngClass]="sourceFilter() === 'web' ? 'btn-primary' : 'btn-outline-primary'"
-                  (click)="setSourceFilter('web')">Web</button>
-                <button type="button" 
-                  class="btn btn-sm" 
-                  [ngClass]="sourceFilter() === 'redes' ? 'btn-primary' : 'btn-outline-primary'"
-                  (click)="setSourceFilter('redes')">Redes</button>
-              </div>
             </div>
             <div class="card-body">
               <div class="table-responsive">
@@ -148,7 +134,6 @@ export class OrdersListComponent implements OnInit {
   loading = signal(false);
   currentPage = signal(1);
   lastPage = signal(1);
-  sourceFilter = signal<'web' | 'redes' | null>(null);
   dataSource = signal<'internal' | 'woocommerce' | 'all'>('all');
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
@@ -180,14 +165,7 @@ export class OrdersListComponent implements OnInit {
     this.loading.set(true);
     this.orderService.getOrders(this.currentPage(), this.itemsPerPage).subscribe({
       next: (response) => {
-        let data = response.data;
-        
-        // Filter by source if needed
-        if (this.sourceFilter()) {
-          data = data.filter(o => this.getOrderSource(o) === this.sourceFilter());
-        }
-
-        this.orders.set(data);
+        this.orders.set(response.data);
         this.lastPage.set(response.last_page);
         this.loading.set(false);
       },
@@ -239,11 +217,6 @@ export class OrdersListComponent implements OnInit {
               new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             );
             
-            // Apply source filter if needed
-            if (this.sourceFilter()) {
-              allOrders = allOrders.filter(o => this.getOrderSource(o) === this.sourceFilter());
-            }
-            
             // Apply pagination client-side for mixed results
             const start = (this.currentPage() - 1) * this.itemsPerPage;
             const paginated = allOrders.slice(start, start + this.itemsPerPage);
@@ -270,12 +243,6 @@ export class OrdersListComponent implements OnInit {
 
   setDataSource(source: 'internal' | 'woocommerce' | 'all') {
     this.dataSource.set(source);
-    this.currentPage.set(1);
-    this.loadOrders();
-  }
-
-  setSourceFilter(source: 'web' | 'redes' | null) {
-    this.sourceFilter.set(source);
     this.currentPage.set(1);
     this.loadOrders();
   }

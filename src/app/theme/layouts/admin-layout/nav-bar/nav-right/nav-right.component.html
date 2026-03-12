@@ -1,3 +1,15 @@
+@if (logoutToast(); as toast) {
+  <div class="logout-toast" role="status" aria-live="polite" aria-atomic="true">
+    <div class="toast show border-0" [ngClass]="toast.type === 'success' ? 'text-bg-success' : 'text-bg-danger'">
+      <div class="toast-header">
+        <strong class="me-auto">{{ toast.type === 'success' ? 'Sesion' : 'Logout' }}</strong>
+        <button type="button" class="btn-close" aria-label="Close" (click)="closeToast()"></button>
+      </div>
+      <div class="toast-body">{{ toast.message }}</div>
+    </div>
+  </div>
+}
+
 <ul class="list-unstyled">
   <li class="dropdown pc-h-item" ngbDropdown>
     <a href="javascript:" class="pc-head-link dropdown-toggle arrow-none me-0 bg-gray-200" data-bs-toggle="dropdown" ngbDropdownToggle>
@@ -87,7 +99,7 @@
   <li class="dropdown pc-h-item header-user-profile" ngbDropdown>
     <a href="javascript:" class="pc-head-link dropdown-toggle arrow-none me-0" ngbDropdownToggle>
       <img src="assets/images/user/avatar-2.jpg" alt="user-image" class="user-avatar me-2" />
-      <span class="f-w-600">John Doe</span>
+      <span class="f-w-600">{{ displayName }}</span>
     </a>
     <div class="dropdown-menu dropdown-user-profile dropdown-menu-end pc-h-dropdown" ngbDropdownMenu>
       <div class="dropdown-header">
@@ -96,10 +108,10 @@
             <img src="assets/images/user/avatar-2.jpg" alt="user-image" class="user-avatar wid-35" />
           </div>
           <div class="flex-grow-1 ms-3 text-start">
-            <h6 class="mb-0">JWT User</h6>
-            <span>UI/UX Designer</span>
+            <h6 class="mb-0">{{ displayName }}</h6>
+            <span>{{ displayRole }}</span>
           </div>
-          <a href="javascript:" class="bg-transparent"><i class="d-flex f-20" antIcon theme="outline" type="logout"></i></a>
+          <a href="javascript:" class="bg-transparent" (click)="onLogout()"><i class="d-flex f-20" antIcon theme="outline" type="logout"></i></a>
         </div>
       </div>
       <ul ngbNav #nav="ngbNav" class="nav drp-tabs nav-fill nav-tabs">
@@ -111,7 +123,7 @@
           <ng-template ngbNavContent>
             @for (task of profile; track task) {
               <div>
-                <a href="javascript:" class="dropdown-item">
+                <a href="javascript:" class="dropdown-item" (click)="onProfileAction(task.title)">
                   <i class="text-muted" antIcon theme="outline" type="{{ task.icon }}"></i>
                   <span>{{ task.title }}</span>
                 </a>

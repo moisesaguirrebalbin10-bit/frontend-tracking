@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const authService = inject(AuthService);
+  const isAuthRequest = req.url.includes('/auth/login') || req.url.includes('/auth/refresh') || req.url.includes('/auth/logout');
   const token = authService.getToken();
   let authReq = req;
 
@@ -19,7 +20,7 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
 
   return next(authReq).pipe(
     catchError((error: HttpErrorResponse) => {
-      if (error.status === 401) {
+      if (error.status === 401 && !isAuthRequest) {
         // Token expired, try refresh
         return authService.refreshToken().pipe(
           switchMap(() => {
@@ -32,11 +33,16 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
             return next(newReq);
           }),
           catchError(() => {
-            authService.logout();
+            authService.clearSession();
             return throwError(() => error);
           })
         );
       }
+
+      if (error.status === 401 && isAuthRequest) {
+        authService.clearSession();
+      }
+
       return throwError(() => error);
     })
   );
