@@ -198,10 +198,10 @@ export class OrdersListComponent implements OnInit {
   private loadAllOrders() {
     this.loading.set(true);
     
-    // Load both internal and WooCommerce orders
-    this.orderService.getOrders(1, 1000).subscribe({
+    // For "Todos", load current page from each source
+    this.orderService.getOrders(this.currentPage(), this.itemsPerPage).subscribe({
       next: (internalResponse) => {
-        this.orderService.getWooCommerceOrders(1, 1000).subscribe({
+        this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage).subscribe({
           next: (wooResponse) => {
             let allOrders: Order[] = [...internalResponse.data];
             
@@ -217,12 +217,15 @@ export class OrdersListComponent implements OnInit {
               new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             );
             
-            // Apply pagination client-side for mixed results
-            const start = (this.currentPage() - 1) * this.itemsPerPage;
-            const paginated = allOrders.slice(start, start + this.itemsPerPage);
+            this.orders.set(allOrders);
             
-            this.orders.set(paginated);
-            this.lastPage.set(Math.ceil(allOrders.length / this.itemsPerPage));
+            // Use the max last_page from both sources as reference
+            // This gives approximate total pages (conservative estimate)
+            const internalLastPage = internalResponse.last_page || 1;
+            const wooLastPage = wooResponse.meta?.total_pages || 1;
+            const maxLastPage = Math.max(internalLastPage, wooLastPage);
+            this.lastPage.set(maxLastPage);
+            
             this.loading.set(false);
           },
           error: (error) => {
@@ -235,8 +238,23 @@ export class OrdersListComponent implements OnInit {
         });
       },
       error: (error) => {
-        console.error('Error loading orders', error);
-        this.loading.set(false);
+        console.error('Error loading internal orders for combined view', error);
+        // Try WooCommerce as fallback
+        this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage).subscribe({
+          next: (wooResponse) => {
+            const wooOrders = (wooResponse.data || []).map(wooOrder =>
+              this.orderService.transformWooCommerceOrder(wooOrder, 'WooCommerce')
+            );
+            this.orders.set(wooOrders);
+            this.lastPage.set(wooResponse.meta?.total_pages || 1);
+            this.loading.set(false);
+          },
+          error: () => {
+            this.orders.set([]);
+            this.lastPage.set(1);
+            this.loading.set(false);
+          }
+        });
       }
     });
   }

@@ -1,7 +1,7 @@
 import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { forkJoin, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { forkJoin, of, Observable, concat } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { OrderService } from '../../../services/order.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from './order-detail-modal.component';
@@ -18,6 +18,7 @@ import { OrderDetailModalComponent } from './order-detail-modal.component';
             <button type="button" class="btn" [ngClass]="timeframe() === 'day' ? 'btn-primary' : 'btn-outline-primary'" (click)="setTimeframe('day')">Por Día</button>
             <button type="button" class="btn" [ngClass]="timeframe() === 'week' ? 'btn-primary' : 'btn-outline-primary'" (click)="setTimeframe('week')">Por Semana</button>
             <button type="button" class="btn" [ngClass]="timeframe() === 'month' ? 'btn-primary' : 'btn-outline-primary'" (click)="setTimeframe('month')">Por Mes</button>
+            <button type="button" class="btn" [ngClass]="timeframe() === 'range' ? 'btn-primary' : 'btn-outline-primary'" (click)="setTimeframe('range')">Filtro Dinámico</button>
           </div>
         </div>
         <div class="col-xl-6 col-md-6">
@@ -25,6 +26,31 @@ import { OrderDetailModalComponent } from './order-detail-modal.component';
             <button type="button" class="btn" [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('all')">Todos</button>
             <button type="button" class="btn" [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('internal')">Internos</button>
             <button type="button" class="btn" [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('woocommerce')">WooCommerce</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row mb-3 g-2" *ngIf="timeframe() === 'range'">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-body py-2">
+              <div class="d-flex align-items-center gap-3 flex-wrap">
+                <span class="text-muted fw-semibold"><i class="ti ti-calendar-search me-1"></i>Rango de fechas:</span>
+                <div class="d-flex align-items-center gap-2">
+                  <label class="text-muted mb-0" style="white-space:nowrap">Desde</label>
+                  <input type="date" class="form-control form-control-sm" style="width:160px"
+                    [value]="dateFrom()"
+                    (change)="onDateFromChange($event)" />
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                  <label class="text-muted mb-0" style="white-space:nowrap">Hasta</label>
+                  <input type="date" class="form-control form-control-sm" style="width:160px"
+                    [value]="dateTo()"
+                    (change)="onDateToChange($event)" />
+                </div>
+                <button *ngIf="dateFrom() || dateTo()" class="btn btn-sm btn-outline-secondary" (click)="clearDateRange()">Limpiar</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -70,7 +96,7 @@ import { OrderDetailModalComponent } from './order-detail-modal.component';
             <div class="card-body">
               <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                 <h5 class="mb-0">{{ ordersTableTitle() }}</h5>
-                <small class="text-muted">{{ filteredOrders().length }} pedidos encontrados</small>
+                <small class="text-muted">{{ pageRangeLabel }}</small>
               </div>
 
               <div *ngIf="loading()" class="text-center py-4">
@@ -96,7 +122,7 @@ import { OrderDetailModalComponent } from './order-detail-modal.component';
                     </tr>
                   </thead>
                   <tbody>
-                    <tr *ngFor="let order of filteredOrders()">
+                    <tr *ngFor="let order of pagedOrders">
                       <td>{{ order.external_id }}</td>
                       <td>{{ order.customer_name }}</td>
                       <td>{{ order.created_at | date: 'short' }}</td>
@@ -124,6 +150,29 @@ import { OrderDetailModalComponent } from './order-detail-modal.component';
                   </tbody>
                 </table>
               </div>
+
+              <div *ngIf="!loading() && totalPages > 1" class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+                <small class="text-muted">Página {{ currentPage() }} de {{ totalPages }}</small>
+                <nav>
+                  <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item" [class.disabled]="currentPage() === 1">
+                      <button class="page-link" (click)="goToPage(1)" [disabled]="currentPage() === 1">&laquo;</button>
+                    </li>
+                    <li class="page-item" [class.disabled]="currentPage() === 1">
+                      <button class="page-link" (click)="goToPage(currentPage() - 1)" [disabled]="currentPage() === 1">&lsaquo;</button>
+                    </li>
+                    <li *ngFor="let p of pageNumbers" class="page-item" [class.active]="p === currentPage()">
+                      <button class="page-link" (click)="goToPage(p)">{{ p }}</button>
+                    </li>
+                    <li class="page-item" [class.disabled]="currentPage() === totalPages">
+                      <button class="page-link" (click)="goToPage(currentPage() + 1)" [disabled]="currentPage() === totalPages">&rsaquo;</button>
+                    </li>
+                    <li class="page-item" [class.disabled]="currentPage() === totalPages">
+                      <button class="page-link" (click)="goToPage(totalPages)" [disabled]="currentPage() === totalPages">&raquo;</button>
+                    </li>
+                  </ul>
+                </nav>
+              </div>
             </div>
           </div>
         </div>
@@ -144,58 +193,107 @@ import { OrderDetailModalComponent } from './order-detail-modal.component';
   `]
 })
 export class OrdersDashboardComponent implements OnInit {
-  timeframe = signal<'day' | 'week' | 'month'>('day');
+  timeframe = signal<'day' | 'week' | 'month' | 'range'>('day');
   dataSource = signal<'internal' | 'woocommerce' | 'all'>('all');
+  dateFrom = signal<string>('');
+  dateTo = signal<string>('');
 
   loading = signal(false);
   allOrders = signal<Order[]>([]);
   filteredOrders = signal<Order[]>([]);
+  apiTotal = signal(0);
+  apiLastPage = signal(1);
 
   totalOrders = signal(0);
   deliveredOrders = signal(0);
   inProgressOrders = signal(0);
   errorOrders = signal(0);
 
+  currentPage = signal(1);
+  readonly pageSize = 20;
+
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
+
+  get pageRangeLabel(): string {
+    const total = this.apiTotal();
+    if (total === 0) return '0 pedidos encontrados';
+    const start = (this.currentPage() - 1) * this.pageSize + 1;
+    const end = Math.min(this.currentPage() * this.pageSize, total);
+    return `Mostrando ${start}–${end} de ${total} pedidos`;
+  }
+
+  get pagedOrders(): Order[] {
+    const start = (this.currentPage() - 1) * this.pageSize;
+    return this.filteredOrders().slice(start, start + this.pageSize);
+  }
+
+  get totalPages(): number {
+    return this.apiLastPage();
+  }
+
+  get pageNumbers(): number[] {
+    const total = this.totalPages;
+    const current = this.currentPage();
+    const delta = 2;
+    const range: number[] = [];
+    for (let i = Math.max(1, current - delta); i <= Math.min(total, current + delta); i++) {
+      range.push(i);
+    }
+    return range;
+  }
+
+  goToPage(page: number) {
+    if (page < 1 || page > this.totalPages) return;
+    this.currentPage.set(page);
+  }
 
   constructor(private orderService: OrderService) {}
 
   ngOnInit() {
-    this.loadDashboard();
+    this.loadAllOrdersOnce();
   }
 
-  setTimeframe(tf: 'day' | 'week' | 'month') {
+  setTimeframe(tf: 'day' | 'week' | 'month' | 'range') {
     this.timeframe.set(tf);
+    this.currentPage.set(1);
+    this.applyFilters();
+  }
+
+  onDateFromChange(event: Event) {
+    this.dateFrom.set((event.target as HTMLInputElement).value);
+    this.currentPage.set(1);
+    this.applyFilters();
+  }
+
+  onDateToChange(event: Event) {
+    this.dateTo.set((event.target as HTMLInputElement).value);
+    this.currentPage.set(1);
+    this.applyFilters();
+  }
+
+  clearDateRange() {
+    this.dateFrom.set('');
+    this.dateTo.set('');
+    this.currentPage.set(1);
     this.applyFilters();
   }
 
   setDataSource(source: 'internal' | 'woocommerce' | 'all') {
     this.dataSource.set(source);
+    this.currentPage.set(1);
     this.applyFilters();
   }
 
-  loadDashboard() {
+  private loadAllOrdersOnce() {
     this.loading.set(true);
 
     forkJoin({
-      internal: this.orderService.getOrders(1, 1000).pipe(
-        catchError((error) => {
-          console.error('Error loading internal orders for dashboard', error);
-          return of({ data: [], current_page: 1, last_page: 1, total: 0 });
-        })
-      ),
-      woo: this.orderService.getWooCommerceOrders(1, 1000).pipe(
-        catchError((error) => {
-          console.error('Error loading WooCommerce orders for dashboard', error);
-          return of({ data: [], meta: { total: 0, total_pages: 1, current_page: 1, per_page: 1000 } });
-        })
-      )
+      internal: this.fetchAllInternalOrders(),
+      woo: this.fetchAllWooOrders()
     }).subscribe({
       next: ({ internal, woo }) => {
-        const wooOrders = (woo.data || []).map((wooOrder) => this.orderService.transformWooCommerceOrder(wooOrder, 'WooCommerce'));
-        const mergedOrders = [...internal.data, ...wooOrders].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
+        const mergedOrders = [...internal, ...woo].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         this.allOrders.set(mergedOrders);
         this.applyFilters();
         this.loading.set(false);
@@ -208,20 +306,69 @@ export class OrdersDashboardComponent implements OnInit {
     });
   }
 
+  private fetchAllInternalOrders(): Observable<Order[]> {
+    return this.orderService.getOrders(1, 100).pipe(
+      switchMap(firstPage => {
+        const allOrders = [...firstPage.data];
+        const lastPage = firstPage.last_page || 1;
+        if (lastPage <= 1) return of(allOrders);
+        const remaining = Array.from({ length: lastPage - 1 }, (_, i) =>
+          this.orderService.getOrders(i + 2, 100).pipe(
+            catchError(() => of({ data: [], current_page: i + 2, last_page: lastPage, total: 0 }))
+          )
+        );
+        return forkJoin(remaining).pipe(
+          map(pages => [...allOrders, ...pages.flatMap(p => p.data)])
+        );
+      }),
+      catchError(err => {
+        console.error('Error loading internal orders for dashboard', err);
+        return of([]);
+      })
+    );
+  }
+
+  private fetchAllWooOrders(): Observable<Order[]> {
+    return this.orderService.getWooCommerceOrders(1, 100).pipe(
+      switchMap(firstPage => {
+        const firstBatch = (firstPage.data || []).map(o => this.orderService.transformWooCommerceOrder(o, 'WooCommerce'));
+        const totalPages = firstPage.meta?.total_pages || 1;
+        if (totalPages <= 1) return of(firstBatch);
+        const remaining = Array.from({ length: totalPages - 1 }, (_, i) =>
+          this.orderService.getWooCommerceOrders(i + 2, 100).pipe(
+            catchError(() => of({ data: [], meta: { total: 0, total_pages: 1, current_page: i + 2, per_page: 100 } }))
+          )
+        );
+        return forkJoin(remaining).pipe(
+          map(pages => [
+            ...firstBatch,
+            ...pages.flatMap(p => (p.data || []).map(o => this.orderService.transformWooCommerceOrder(o, 'WooCommerce')))
+          ])
+        );
+      }),
+      catchError(err => {
+        console.error('Error loading WooCommerce orders for dashboard', err);
+        return of([]);
+      })
+    );
+  }
+
   private applyFilters() {
     const now = new Date();
-    const orders = this.allOrders()
+    const filtered = this.allOrders()
       .filter((order) => this.matchesDataSource(order))
       .filter((order) => this.isWithinSelectedTimeframe(order.created_at, now))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    this.filteredOrders.set(orders);
-    this.totalOrders.set(orders.length);
-    this.deliveredOrders.set(orders.filter((order) => order.status === OrderStatus.ENTREGADO).length);
+    this.filteredOrders.set(filtered);
+    this.apiTotal.set(filtered.length);
+    this.apiLastPage.set(Math.ceil(filtered.length / this.pageSize));
+    this.totalOrders.set(filtered.length);
+    this.deliveredOrders.set(filtered.filter((order) => order.status === OrderStatus.ENTREGADO).length);
     this.inProgressOrders.set(
-      orders.filter((order) => [OrderStatus.EN_PROCESO, OrderStatus.EMPAQUETADO, OrderStatus.DESPACHADO, OrderStatus.EN_CAMINO].includes(order.status)).length
+      filtered.filter((order) => [OrderStatus.EN_PROCESO, OrderStatus.EMPAQUETADO, OrderStatus.DESPACHADO, OrderStatus.EN_CAMINO].includes(order.status)).length
     );
-    this.errorOrders.set(orders.filter((order) => order.status === OrderStatus.ERROR).length);
+    this.errorOrders.set(filtered.filter((order) => order.status === OrderStatus.ERROR).length);
   }
 
   private matchesDataSource(order: Order): boolean {
@@ -247,6 +394,26 @@ export class OrdersDashboardComponent implements OnInit {
       return this.isSameWeek(orderDate, referenceDate);
     }
 
+    if (this.timeframe() === 'range') {
+      const from = this.dateFrom();
+      const to = this.dateTo();
+      const orderDay = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate());
+      if (from && to) {
+        const fromDay = new Date(from + 'T00:00:00');
+        const toDay = new Date(to + 'T23:59:59');
+        return orderDay >= fromDay && orderDay <= toDay;
+      }
+      if (from) {
+        const fromDay = new Date(from + 'T00:00:00');
+        return orderDay >= fromDay;
+      }
+      if (to) {
+        const toDay = new Date(to + 'T23:59:59');
+        return orderDay <= toDay;
+      }
+      return true;
+    }
+
     return orderDate.getFullYear() === referenceDate.getFullYear() && orderDate.getMonth() === referenceDate.getMonth();
   }
 
@@ -266,12 +433,19 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   ordersTableTitle(): string {
-    const titles = {
+    if (this.timeframe() === 'range') {
+      const from = this.dateFrom();
+      const to = this.dateTo();
+      if (from && to) return `Pedidos del ${from} al ${to}`;
+      if (from) return `Pedidos desde ${from}`;
+      if (to) return `Pedidos hasta ${to}`;
+      return 'Pedidos — Filtro Dinámico';
+    }
+    const titles: Record<string, string> = {
       day: 'Pedidos del Día',
       week: 'Pedidos de la Semana',
       month: 'Pedidos del Mes'
     };
-
     return titles[this.timeframe()];
   }
 
