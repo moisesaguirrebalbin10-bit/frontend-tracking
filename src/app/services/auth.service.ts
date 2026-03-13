@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, BehaviorSubject, of, catchError, finalize, throwError } from 'rxjs';
 import { map, switchMap, tap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
@@ -14,6 +14,7 @@ export class AuthService {
   private readonly accessTokenKey = 'access_token';
   private readonly refreshTokenKey = 'refresh_token';
   private readonly expiresInKey = 'expires_in';
+  private readonly tokenExpiryKey = 'token_expiry';
   private readonly currentUserKey = 'current_user';
   private currentUserSubject = new BehaviorSubject<User | null>(null);
   public currentUser$ = this.currentUserSubject.asObservable();
@@ -30,7 +31,17 @@ export class AuthService {
 
     const token = localStorage.getItem(this.accessTokenKey);
     if (token) {
-      this.fetchCurrentUser().subscribe();
+      if (this.isTokenExpired()) {
+        if (this.getRefreshToken()) {
+          this.refreshToken().subscribe({
+            error: () => this.clearSession()
+          });
+        } else {
+          this.clearSession();
+        }
+      } else {
+        this.fetchCurrentUser().subscribe();
+      }
     }
   }
 
@@ -89,7 +100,16 @@ export class AuthService {
   }
 
   isAuthenticated(): boolean {
-    return !!this.getToken();
+    const token = this.getToken();
+    if (!token) {
+      return false;
+    }
+
+    if (!this.isTokenExpired()) {
+      return true;
+    }
+
+    return !!this.getRefreshToken();
   }
 
   getCurrentUser(): User | null {
@@ -100,6 +120,7 @@ export class AuthService {
     localStorage.removeItem(this.accessTokenKey);
     localStorage.removeItem(this.refreshTokenKey);
     localStorage.removeItem(this.expiresInKey);
+    localStorage.removeItem(this.tokenExpiryKey);
     localStorage.removeItem(this.currentUserKey);
     this.currentUserSubject.next(null);
   }
@@ -108,9 +129,13 @@ export class AuthService {
     return this.http.get<MeResponse>(`${this.apiUrl}/me`).pipe(
       map((response) => response.user),
       tap((user) => this.setCurrentUser(user)),
-      catchError(() => {
-        this.clearSession();
-        return of(null);
+      catchError((error: HttpErrorResponse) => {
+        if (error.status === 401) {
+          this.clearSession();
+          return of(null);
+        }
+
+        return of(this.currentUserSubject.value);
       })
     );
   }
@@ -124,7 +149,22 @@ export class AuthService {
 
     if (typeof expiresIn === 'number') {
       localStorage.setItem(this.expiresInKey, String(expiresIn));
+      localStorage.setItem(this.tokenExpiryKey, String(Date.now() + expiresIn * 1000));
     }
+  }
+
+  private isTokenExpired(): boolean {
+    const storedExpiry = localStorage.getItem(this.tokenExpiryKey);
+    if (!storedExpiry) {
+      return false;
+    }
+
+    const expiry = Number(storedExpiry);
+    if (!Number.isFinite(expiry)) {
+      return false;
+    }
+
+    return Date.now() >= expiry;
   }
 
   private setCurrentUser(user: User | null): void {
