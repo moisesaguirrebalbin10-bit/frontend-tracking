@@ -86,7 +86,7 @@ import { OrderService } from '../../../services/order.service';
               <div class="col-md-6">
                 <p><strong>Nro Boleta:</strong> {{ order.id }}</p>
                 <p><strong>Origen:</strong> 
-                  <span class="badge" [ngClass]="getOrderSource(order) === 'Web' ? 'bg-primary' : 'bg-info'">
+                  <span class="badge" [ngClass]="getOrderSourceBadgeClass(order)">
                     {{ getOrderSource(order) }}
                   </span>
                 </p>
@@ -129,11 +129,7 @@ export class OrderDetailModalComponent implements OnChanges {
     private cdr: ChangeDetectorRef
   ) {}
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['order'] && this.order) {
-      // Order updated, nothing special needed
-    }
-  }
+  ngOnChanges(changes: SimpleChanges) {}
 
   onStatusSelected(event: { status: string; confirmed: boolean; errorReason?: string }) {
     if (!event.confirmed || !this.order) return;
@@ -149,9 +145,7 @@ export class OrderDetailModalComponent implements OnChanges {
       next: (response) => {
         console.log(`Estado actualizado a ${this.getStatusLabel(event.status)}`);
         this.order!.status = event.status as any;
-        if (event.errorReason) {
-          this.order!.error_reason = event.errorReason;
-        }
+        if (event.errorReason) this.order!.error_reason = event.errorReason;
         this.isLoading = false;
         this.cdr.markForCheck();
       },
@@ -166,13 +160,28 @@ export class OrderDetailModalComponent implements OnChanges {
   }
 
   getOrderSource(order?: Order): string {
-    if (!order?.user) return 'Redes';
+    if (!order) return 'Desconocido';
+
+    if (order.woo_source || order.source === 'woocommerce' || order.store_slug) {
+      return order.woo_source || 'WooCommerce';
+    }
 
     const role = order.user.role?.toLowerCase();
     if (role?.includes('web')) return 'Web';
     if (role?.includes('redes')) return 'Redes';
 
     return 'Redes';
+  }
+
+  getOrderSourceBadgeClass(order?: Order): string {
+    if (!order) return 'bg-secondary';
+    if (order.woo_source || order.source === 'woocommerce' || order.store_slug) return 'bg-warning';
+
+    const role = order.user?.role?.toLowerCase();
+    if (role?.includes('web')) return 'bg-primary';
+    if (role?.includes('redes')) return 'bg-info';
+
+    return 'bg-secondary';
   }
 
   getStatusLabel(status: string): string {
@@ -198,6 +207,8 @@ export class OrderDetailModalComponent implements OnChanges {
     }
     return date;
   }
+
+
 
   close() {
     this.closeModal.emit();

@@ -1,8 +1,9 @@
 import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { forkJoin, of, Observable, concat } from 'rxjs';
+import { forkJoin, of, Observable } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
 import { OrderService } from '../../../services/order.service';
+import { WooCommerceService, WooCommerceStore } from '../../../services/woocommerce.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from './order-detail-modal.component';
 
@@ -49,6 +50,27 @@ import { OrderDetailModalComponent } from './order-detail-modal.component';
                     (change)="onDateToChange($event)" />
                 </div>
                 <button *ngIf="dateFrom() || dateTo()" class="btn btn-sm btn-outline-secondary" (click)="clearDateRange()">Limpiar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row mb-3 g-2" *ngIf="(dataSource() === 'woocommerce' || dataSource() === 'all') && availableStores().length > 1">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-body py-2">
+              <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span class="text-muted fw-semibold"><i class="ti ti-building-store me-1"></i>Tienda:</span>
+                <button
+                  class="btn btn-sm"
+                  [ngClass]="selectedStoreSlugs().length === 0 ? 'btn-primary' : 'btn-outline-primary'"
+                  (click)="clearStoreFilter()">Todas</button>
+                <button
+                  *ngFor="let store of availableStores()"
+                  class="btn btn-sm"
+                  [ngClass]="isStoreSelected(store.slug) ? 'btn-warning' : 'btn-outline-secondary'"
+                  (click)="toggleStore(store.slug)">{{ store.label }}</button>
               </div>
             </div>
           </div>
@@ -210,10 +232,13 @@ export class OrdersDashboardComponent implements OnInit {
   errorOrders = signal(0);
 
   currentPage = signal(1);
-  readonly pageSize = 20;
+  readonly pageSize = 100;
 
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
+  availableStores = signal<WooCommerceStore[]>([]);
+  selectedStoreSlugs = signal<string[]>([]);
+  private hasFullDataset = signal(false);
 
   get pageRangeLabel(): string {
     const total = this.apiTotal();
@@ -248,15 +273,23 @@ export class OrdersDashboardComponent implements OnInit {
     this.currentPage.set(page);
   }
 
-  constructor(private orderService: OrderService) {}
+  constructor(
+    private orderService: OrderService,
+    private wooCommerceService: WooCommerceService
+  ) {}
 
   ngOnInit() {
-    this.loadAllOrdersOnce();
+    this.loadStores();
+    this.loadAllOrdersOnce(false);
   }
 
   setTimeframe(tf: 'day' | 'week' | 'month' | 'range') {
     this.timeframe.set(tf);
     this.currentPage.set(1);
+    if (tf === 'range' && !this.hasFullDataset()) {
+      this.loadAllOrdersOnce(true);
+      return;
+    }
     this.applyFilters();
   }
 
@@ -281,16 +314,52 @@ export class OrdersDashboardComponent implements OnInit {
 
   setDataSource(source: 'internal' | 'woocommerce' | 'all') {
     this.dataSource.set(source);
+    this.selectedStoreSlugs.set([]);
     this.currentPage.set(1);
+    if (this.timeframe() === 'range' && !this.hasFullDataset()) {
+      this.loadAllOrdersOnce(true);
+      return;
+    }
     this.applyFilters();
   }
 
-  private loadAllOrdersOnce() {
+  toggleStore(slug: string) {
+    const current = this.selectedStoreSlugs();
+    const idx = current.indexOf(slug);
+    this.selectedStoreSlugs.set(idx >= 0 ? current.filter(s => s !== slug) : [...current, slug]);
+    this.currentPage.set(1);
+    if (this.timeframe() === 'range' && !this.hasFullDataset()) {
+      this.loadAllOrdersOnce(true);
+      return;
+    }
+    this.applyFilters();
+  }
+
+  clearStoreFilter() {
+    this.selectedStoreSlugs.set([]);
+    this.currentPage.set(1);
+    if (this.timeframe() === 'range' && !this.hasFullDataset()) {
+      this.loadAllOrdersOnce(true);
+      return;
+    }
+    this.applyFilters();
+  }
+
+  isStoreSelected(slug: string): boolean {
+    return this.selectedStoreSlugs().includes(slug);
+  }
+
+  private loadStores() {
+    this.wooCommerceService.listStores().subscribe(stores => this.availableStores.set(stores));
+  }
+
+  private loadAllOrdersOnce(fullData: boolean) {
     this.loading.set(true);
+    this.hasFullDataset.set(fullData);
 
     forkJoin({
-      internal: this.fetchAllInternalOrders(),
-      woo: this.fetchAllWooOrders()
+      internal: this.fetchAllInternalOrders(fullData),
+      woo: this.fetchAllWooOrders(fullData)
     }).subscribe({
       next: ({ internal, woo }) => {
         const mergedOrders = [...internal, ...woo].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -306,10 +375,52 @@ export class OrdersDashboardComponent implements OnInit {
     });
   }
 
-  private fetchAllInternalOrders(): Observable<Order[]> {
+  private fetchAllWooOrders(fullData: boolean): Observable<Order[]> {
+    const stores = this.selectedStoreSlugs();
+    const filters = stores.length ? { stores } : undefined;
+
+    return this.orderService.getWooCommerceOrders(1, this.pageSize, filters).pipe(
+      switchMap(firstPage => {
+        const firstOrders = (firstPage.data || []).map((wooOrder) =>
+          this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
+        );
+
+        if (!fullData) {
+          return of(firstOrders);
+        }
+
+        const lastPage = firstPage.meta?.total_pages || 1;
+        if (lastPage <= 1) {
+          return of(firstOrders);
+        }
+
+        const remaining = Array.from({ length: lastPage - 1 }, (_, i) =>
+          this.orderService.getWooCommerceOrders(i + 2, this.pageSize, filters).pipe(
+            map(response => (response.data || []).map((wooOrder) =>
+              this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
+            )),
+            catchError(() => of([]))
+          )
+        );
+
+        return forkJoin(remaining).pipe(
+          map(pages => [...firstOrders, ...pages.flatMap(page => page)])
+        );
+      }),
+      catchError(err => {
+        console.error('Error loading WooCommerce orders for dashboard', err);
+        return of([]);
+      })
+    );
+  }
+
+  private fetchAllInternalOrders(fullData: boolean): Observable<Order[]> {
     return this.orderService.getOrders(1, 100).pipe(
       switchMap(firstPage => {
         const allOrders = [...firstPage.data];
+        if (!fullData) {
+          return of(allOrders);
+        }
         const lastPage = firstPage.last_page || 1;
         if (lastPage <= 1) return of(allOrders);
         const remaining = Array.from({ length: lastPage - 1 }, (_, i) =>
@@ -328,31 +439,6 @@ export class OrdersDashboardComponent implements OnInit {
     );
   }
 
-  private fetchAllWooOrders(): Observable<Order[]> {
-    return this.orderService.getWooCommerceOrders(1, 100).pipe(
-      switchMap(firstPage => {
-        const firstBatch = (firstPage.data || []).map(o => this.orderService.transformWooCommerceOrder(o, 'WooCommerce'));
-        const totalPages = firstPage.meta?.total_pages || 1;
-        if (totalPages <= 1) return of(firstBatch);
-        const remaining = Array.from({ length: totalPages - 1 }, (_, i) =>
-          this.orderService.getWooCommerceOrders(i + 2, 100).pipe(
-            catchError(() => of({ data: [], meta: { total: 0, total_pages: 1, current_page: i + 2, per_page: 100 } }))
-          )
-        );
-        return forkJoin(remaining).pipe(
-          map(pages => [
-            ...firstBatch,
-            ...pages.flatMap(p => (p.data || []).map(o => this.orderService.transformWooCommerceOrder(o, 'WooCommerce')))
-          ])
-        );
-      }),
-      catchError(err => {
-        console.error('Error loading WooCommerce orders for dashboard', err);
-        return of([]);
-      })
-    );
-  }
-
   private applyFilters() {
     const now = new Date();
     const filtered = this.allOrders()
@@ -362,7 +448,7 @@ export class OrdersDashboardComponent implements OnInit {
 
     this.filteredOrders.set(filtered);
     this.apiTotal.set(filtered.length);
-    this.apiLastPage.set(Math.ceil(filtered.length / this.pageSize));
+    this.apiLastPage.set(Math.max(1, Math.ceil(filtered.length / this.pageSize)));
     this.totalOrders.set(filtered.length);
     this.deliveredOrders.set(filtered.filter((order) => order.status === OrderStatus.ENTREGADO).length);
     this.inProgressOrders.set(
@@ -372,15 +458,24 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   private matchesDataSource(order: Order): boolean {
-    if (this.dataSource() === 'all') {
-      return true;
-    }
+    const isWoo = this.getOrderSource(order) === 'woocommerce';
 
     if (this.dataSource() === 'internal') {
-      return this.getOrderSource(order) !== 'woocommerce';
+      return !isWoo;
     }
 
-    return this.getOrderSource(order) === 'woocommerce';
+    if (this.dataSource() === 'woocommerce') {
+      return isWoo && this.matchesStoreFilter(order);
+    }
+
+    // 'all': internal orders always pass; Woo orders must match store filter
+    return isWoo ? this.matchesStoreFilter(order) : true;
+  }
+
+  private matchesStoreFilter(order: Order): boolean {
+    const selected = this.selectedStoreSlugs();
+    if (selected.length === 0) return true;
+    return selected.includes(order.store_slug ?? '');
   }
 
   private isWithinSelectedTimeframe(dateValue: string, referenceDate: Date): boolean {

@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, BehaviorSubject, of, tap, catchError, finalize, throwError } from 'rxjs';
+import { Observable, BehaviorSubject, of, catchError, finalize, throwError } from 'rxjs';
+import { map, switchMap, tap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
-import { LoginRequest, RegisterRequest, AuthResponse, RefreshTokenResponse, LogoutResponse } from '../models/auth.model';
+import { LoginRequest, RegisterRequest, AuthResponse, RefreshTokenResponse, LogoutResponse, MeResponse } from '../models/auth.model';
 import { User } from '../models/user.model';
 
 @Injectable({
@@ -35,9 +36,15 @@ export class AuthService {
 
   login(credentials: LoginRequest): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.apiUrl}/auth/login`, credentials).pipe(
-      tap(response => {
+      switchMap((response) => {
         this.storeAuthSession(response.access_token, response.refresh_token, response.expires_in);
-        this.setCurrentUser(response.user);
+
+        if (response.user) {
+          this.setCurrentUser(response.user);
+          return of(response);
+        }
+
+        return this.fetchCurrentUser().pipe(map(() => response));
       })
     );
   }
@@ -66,9 +73,9 @@ export class AuthService {
       throw new Error('No refresh token available');
     }
     return this.http.post<RefreshTokenResponse>(`${this.apiUrl}/auth/refresh`, { refresh_token: refreshToken }).pipe(
-      tap(response => {
-        this.storeAuthSession(response.access_token, response.refresh_token, response.expires_in);
-        this.fetchCurrentUser().subscribe();
+      switchMap((response) => {
+        this.storeAuthSession(response.access_token, response.refresh_token ?? refreshToken, response.expires_in);
+        return this.fetchCurrentUser().pipe(map(() => response));
       })
     );
   }
@@ -98,8 +105,9 @@ export class AuthService {
   }
 
   private fetchCurrentUser(): Observable<User | null> {
-    return this.http.get<User>(`${this.apiUrl}/me`).pipe(
-      tap(user => this.setCurrentUser(user)),
+    return this.http.get<MeResponse>(`${this.apiUrl}/me`).pipe(
+      map((response) => response.user),
+      tap((user) => this.setCurrentUser(user)),
       catchError(() => {
         this.clearSession();
         return of(null);
@@ -107,10 +115,16 @@ export class AuthService {
     );
   }
 
-  private storeAuthSession(accessToken: string, refreshToken: string, expiresIn: number): void {
+  private storeAuthSession(accessToken: string, refreshToken?: string | null, expiresIn?: number): void {
     localStorage.setItem(this.accessTokenKey, accessToken);
-    localStorage.setItem(this.refreshTokenKey, refreshToken);
-    localStorage.setItem(this.expiresInKey, String(expiresIn));
+
+    if (refreshToken) {
+      localStorage.setItem(this.refreshTokenKey, refreshToken);
+    }
+
+    if (typeof expiresIn === 'number') {
+      localStorage.setItem(this.expiresInKey, String(expiresIn));
+    }
   }
 
   private setCurrentUser(user: User | null): void {

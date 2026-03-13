@@ -1,7 +1,7 @@
 import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { OrderService } from '../../../services/order.service';
-import { WooCommerceService, WooCommerceOrder } from '../../../services/woocommerce.service';
+import { WooCommerceService, WooCommerceStore } from '../../../services/woocommerce.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/order-detail-modal.component';
 
@@ -14,21 +14,36 @@ import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/orde
       <div class="row">
         <div class="col-12">
           <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <h5>Pedidos</h5>
-              <div class="btn-group me-3" role="group">
-                <button type="button" 
-                  class="btn btn-sm" 
-                  [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'"
-                  (click)="setDataSource('internal')">Internos</button>
-                <button type="button" 
-                  class="btn btn-sm" 
-                  [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'"
-                  (click)="setDataSource('woocommerce')">WooCommerce</button>
-                <button type="button" 
-                  class="btn btn-sm" 
-                  [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'"
-                  (click)="setDataSource('all')">Todos</button>
+            <div class="card-header">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0">Pedidos</h5>
+                <div class="btn-group" role="group">
+                  <button type="button"
+                    class="btn btn-sm"
+                    [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'"
+                    (click)="setDataSource('internal')">Internos</button>
+                  <button type="button"
+                    class="btn btn-sm"
+                    [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'"
+                    (click)="setDataSource('woocommerce')">WooCommerce</button>
+                  <button type="button"
+                    class="btn btn-sm"
+                    [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'"
+                    (click)="setDataSource('all')">Todos</button>
+                </div>
+              </div>
+              <div class="d-flex align-items-center gap-2 flex-wrap mt-2"
+                *ngIf="(dataSource() === 'woocommerce' || dataSource() === 'all') && availableStores().length > 1">
+                <span class="text-muted small fw-semibold"><i class="ti ti-building-store me-1"></i>Tienda:</span>
+                <button
+                  class="btn btn-sm"
+                  [ngClass]="selectedStoreSlugs().length === 0 ? 'btn-primary' : 'btn-outline-primary'"
+                  (click)="clearStoreFilter()">Todas</button>
+                <button
+                  *ngFor="let store of availableStores()"
+                  class="btn btn-sm"
+                  [ngClass]="isStoreSelected(store.slug) ? 'btn-warning' : 'btn-outline-secondary'"
+                  (click)="toggleStore(store.slug)">{{ store.label }}</button>
               </div>
             </div>
             <div class="card-body">
@@ -137,8 +152,10 @@ export class OrdersListComponent implements OnInit {
   dataSource = signal<'internal' | 'woocommerce' | 'all'>('all');
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
-  
-  private readonly itemsPerPage = 50;
+  availableStores = signal<WooCommerceStore[]>([]);
+  selectedStoreSlugs = signal<string[]>([]);
+
+  private readonly itemsPerPage = 100;
 
   constructor(
     private orderService: OrderService,
@@ -146,6 +163,7 @@ export class OrdersListComponent implements OnInit {
   ) {}
 
   ngOnInit() {
+    this.loadStores();
     this.loadOrders();
   }
 
@@ -178,14 +196,17 @@ export class OrdersListComponent implements OnInit {
 
   private loadWooCommerceOrders() {
     this.loading.set(true);
-    this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage).subscribe({
+    const storeFilter = this.selectedStoreSlugs();
+    this.orderService.getWooCommerceOrders(
+      this.currentPage(), this.itemsPerPage,
+      storeFilter.length ? { stores: storeFilter } : undefined
+    ).subscribe({
       next: (response) => {
-        const transformedOrders = (response.data || []).map(wooOrder => 
-          this.orderService.transformWooCommerceOrder(wooOrder, 'WooCommerce')
+        const transformedOrders = (response.data || []).map(wooOrder =>
+          this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
         );
-        
         this.orders.set(transformedOrders);
-        this.lastPage.set(response.meta.total_pages);
+        this.lastPage.set(response.meta.total_pages || 1);
         this.loading.set(false);
       },
       error: (error) => {
@@ -197,53 +218,34 @@ export class OrdersListComponent implements OnInit {
 
   private loadAllOrders() {
     this.loading.set(true);
-    
-    // For "Todos", load current page from each source
+    const storeFilter = this.selectedStoreSlugs();
+    const wooFilters = storeFilter.length ? { stores: storeFilter } : undefined;
+
     this.orderService.getOrders(this.currentPage(), this.itemsPerPage).subscribe({
       next: (internalResponse) => {
-        this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage).subscribe({
+        this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage, wooFilters).subscribe({
           next: (wooResponse) => {
-            let allOrders: Order[] = [...internalResponse.data];
-            
-            // Add transformed WooCommerce orders
             const wooOrders = (wooResponse.data || []).map(wooOrder =>
-              this.orderService.transformWooCommerceOrder(wooOrder, 'WooCommerce')
+              this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
             );
-            
-            allOrders = [...allOrders, ...wooOrders];
-            
-            // Sort by date descending  
-            allOrders.sort((a, b) => 
-              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-            );
-            
+            const allOrders = [...internalResponse.data, ...wooOrders]
+              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
             this.orders.set(allOrders);
-            
-            // Use the max last_page from both sources as reference
-            // This gives approximate total pages (conservative estimate)
-            const internalLastPage = internalResponse.last_page || 1;
-            const wooLastPage = wooResponse.meta?.total_pages || 1;
-            const maxLastPage = Math.max(internalLastPage, wooLastPage);
-            this.lastPage.set(maxLastPage);
-            
+            this.lastPage.set(Math.max(internalResponse.last_page || 1, wooResponse.meta?.total_pages || 1));
             this.loading.set(false);
           },
-          error: (error) => {
-            console.error('Error loading WooCommerce orders in combined view', error);
-            // Fall back to internal orders only
+          error: () => {
             this.orders.set(internalResponse.data);
             this.lastPage.set(internalResponse.last_page);
             this.loading.set(false);
           }
         });
       },
-      error: (error) => {
-        console.error('Error loading internal orders for combined view', error);
-        // Try WooCommerce as fallback
-        this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage).subscribe({
+      error: () => {
+        this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage, wooFilters).subscribe({
           next: (wooResponse) => {
             const wooOrders = (wooResponse.data || []).map(wooOrder =>
-              this.orderService.transformWooCommerceOrder(wooOrder, 'WooCommerce')
+              this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
             );
             this.orders.set(wooOrders);
             this.lastPage.set(wooResponse.meta?.total_pages || 1);
@@ -261,8 +263,31 @@ export class OrdersListComponent implements OnInit {
 
   setDataSource(source: 'internal' | 'woocommerce' | 'all') {
     this.dataSource.set(source);
+    this.selectedStoreSlugs.set([]);
     this.currentPage.set(1);
     this.loadOrders();
+  }
+
+  toggleStore(slug: string) {
+    const current = this.selectedStoreSlugs();
+    const idx = current.indexOf(slug);
+    this.selectedStoreSlugs.set(idx >= 0 ? current.filter(s => s !== slug) : [...current, slug]);
+    this.currentPage.set(1);
+    this.loadOrders();
+  }
+
+  clearStoreFilter() {
+    this.selectedStoreSlugs.set([]);
+    this.currentPage.set(1);
+    this.loadOrders();
+  }
+
+  isStoreSelected(slug: string): boolean {
+    return this.selectedStoreSlugs().includes(slug);
+  }
+
+  private loadStores() {
+    this.wooCommerceService.listStores().subscribe(stores => this.availableStores.set(stores));
   }
 
   getStatusClass(status: OrderStatus): string {

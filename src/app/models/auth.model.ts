@@ -14,9 +14,9 @@ export interface RegisterRequest {
 export interface AuthResponse {
   access_token: string;
   token_type: string;
-  expires_in: number;
-  refresh_token: string;
-  user: User;
+  expires_in?: number;
+  refresh_token?: string;
+  user?: User;
 }
 
 export interface RefreshTokenRequest {
@@ -26,8 +26,12 @@ export interface RefreshTokenRequest {
 export interface RefreshTokenResponse {
   access_token: string;
   token_type: string;
-  expires_in: number;
-  refresh_token: string;
+  expires_in?: number;
+  refresh_token?: string;
+}
+
+export interface MeResponse {
+  user: User;
 }
 
 export interface LogoutRequest {
@@ -35,5 +39,5 @@ export interface LogoutRequest {
 }
 
 export interface LogoutResponse {
-  message: string;
+  message?: string;
 }

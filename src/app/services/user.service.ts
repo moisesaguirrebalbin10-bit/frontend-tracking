@@ -1,7 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
+import { MeResponse } from '../models/auth.model';
 import { User, UserRole } from '../models/user.model';
 
 @Injectable({
@@ -21,6 +23,6 @@ export class UserService {
   }
 
   getCurrentUser(): Observable<User> {
-    return this.http.get<User>(`${this.apiUrl}/me`);
+    return this.http.get<MeResponse>(`${this.apiUrl}/me`).pipe(map((response) => response.user));
   }
 }

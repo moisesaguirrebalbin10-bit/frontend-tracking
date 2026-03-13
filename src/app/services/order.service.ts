@@ -1,9 +1,10 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { Order, OrderStatus, OrderTimeline, OrderLog } from '../models/order.model';
-import { WooCommerceService, WooCommerceOrder, WooCommerceOrdersResponse } from './woocommerce.service';
+import { WooCommerceService, WooCommerceOrder, WooCommerceOrdersFilters, WooCommerceOrdersResponse } from './woocommerce.service';
 
 export interface OrdersResponse {
   data: Order[];
@@ -23,7 +24,7 @@ export class OrderService {
     private wooCommerceService: WooCommerceService
   ) {}
 
-  getOrders(page: number = 1, perPage: number = 50): Observable<OrdersResponse> {
+  getOrders(page: number = 1, perPage: number = 100): Observable<OrdersResponse> {
     const params = new HttpParams()
       .set('page', page.toString())
       .set('per_page', perPage.toString());
@@ -74,26 +75,38 @@ export class OrderService {
   /**
    * Get WooCommerce orders
    */
-  getWooCommerceOrders(page: number = 1, perPage: number = 20): Observable<WooCommerceOrdersResponse> {
-    return this.wooCommerceService.getOrders(page, perPage);
+  getWooCommerceOrders(
+    page: number = 1,
+    perPage: number = 20,
+    filters?: WooCommerceOrdersFilters
+  ): Observable<WooCommerceOrdersResponse> {
+    return this.wooCommerceService.getOrders(page, perPage, filters);
+  }
+
+  getAllWooCommerceOrders(filters?: WooCommerceOrdersFilters): Observable<Order[]> {
+    return this.wooCommerceService.getAllOrders(filters).pipe(
+      map((orders) => orders.map((order) => this.transformWooCommerceOrder(order, order.store_label)))
+    );
   }
 
   /**
    * Get a single WooCommerce order
    */
-  getWooCommerceOrder(id: number | string): Observable<WooCommerceOrder> {
-    return this.wooCommerceService.getOrder(id);
+  getWooCommerceOrder(id: number | string, storeSlug: string): Observable<Order> {
+    return this.wooCommerceService.getOrder(id, storeSlug).pipe(
+      map((order) => this.transformWooCommerceOrder(order, order.store_label))
+    );
   }
 
   /**
    * Transform WooCommerce order to internal Order format
    */
-  transformWooCommerceOrder(wooOrder: WooCommerceOrder, storeName: string = 'WooCommerce'): Order {
+  transformWooCommerceOrder(wooOrder: WooCommerceOrder, storeName: string = wooOrder.store_label ?? wooOrder.store_slug ?? 'WooCommerce'): Order {
     const customerName = `${wooOrder.billing?.first_name || ''} ${wooOrder.billing?.last_name || ''}`.trim();
     
     return {
       id: wooOrder.id,
-      external_id: wooOrder.order_number || String(wooOrder.id),
+      external_id: wooOrder.order_number || wooOrder.number || String(wooOrder.id),
       status: this.mapWooCommerceStatus(wooOrder.status),
       total: parseFloat(wooOrder.total) || 0,
       customer_name: customerName || 'Sin nombre',
@@ -161,7 +174,7 @@ export class OrderService {
         return null;
       })(),
       created_at: wooOrder.date_created,
-      updated_at: wooOrder.date_created,
+      updated_at: wooOrder['date_modified'] || wooOrder.date_created,
       meta: wooOrder,
       items: (wooOrder.line_items || []).map(item => ({
         id: item.id,
@@ -170,9 +183,10 @@ export class OrderService {
         price: parseFloat(item.price) || 0,
         image_url: item.image?.src
       })),
+      store_slug: wooOrder.store_slug,
       woo_source: storeName,
       woo_status: wooOrder.status,
-      woo_order_number: wooOrder.order_number,
+      woo_order_number: wooOrder.order_number || wooOrder.number,
       woo_order_id: wooOrder.id
     };
   }

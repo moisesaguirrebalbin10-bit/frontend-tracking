@@ -30,6 +30,7 @@ export interface Order {
     role: string;
   };
   // WooCommerce specific fields
+  store_slug?: string;
   woo_source?: string; // Store name/url
   woo_status?: string; // WooCommerce status (pending, processing, on-hold, completed, cancelled, refunded)
   woo_order_number?: string;
