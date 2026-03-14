@@ -24,18 +24,30 @@
       <i class="ti ti-search"></i>
     </a>
     <div class="dropdown-menu dropdowm-menu-end pc-h-dropdown drp-search" ngbDropdownMenu>
-      <form class="px-3">
+      <form class="px-3" (submit)="$event.preventDefault()">
         <div class="form-group mb-0 d-flex align-items-center">
           <i class="search f-12" antIcon type="search" theme="outline"></i>
-          <input type="search" class="form-control border-0 shadow-none" placeholder="Ctrl + K" />
+          <input
+            type="search"
+            class="form-control border-0 shadow-none"
+            [value]="searchValue"
+            [placeholder]="searchPlaceholder"
+            (input)="onSearchInput($event)"
+          />
         </div>
       </form>
     </div>
   </li>
   <li class="pc-h-item d-none d-md-inline-flex">
-    <form class="header-search">
+    <form class="header-search" (submit)="$event.preventDefault()">
       <i class="search f-12" antIcon type="search" theme="outline"></i>
-      <input type="search" class="form-control" placeholder="Ctrl + K" />
+      <input
+        type="search"
+        class="form-control"
+        [value]="searchValue"
+        [placeholder]="searchPlaceholder"
+        (input)="onSearchInput($event)"
+      />
     </form>
   </li>
 </ul>

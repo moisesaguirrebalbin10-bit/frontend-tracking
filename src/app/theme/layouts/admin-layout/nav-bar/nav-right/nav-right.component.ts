@@ -84,44 +84,12 @@ export class NavRightComponent {
 
   profile = [
     {
-      icon: 'edit',
-      title: 'Edit Profile'
-    },
-    {
-      icon: 'user',
-      title: 'View Profile'
-    },
-    {
-      icon: 'profile',
-      title: 'Social Profile'
-    },
-    {
-      icon: 'wallet',
-      title: 'Billing'
-    },
-    {
       icon: 'logout',
       title: 'Logout'
     }
   ];
 
   setting = [
-    {
-      icon: 'question-circle',
-      title: 'Support'
-    },
-    {
-      icon: 'user',
-      title: 'Account Settings'
-    },
-    {
-      icon: 'lock',
-      title: 'Privacy Center'
-    },
-    {
-      icon: 'comment',
-      title: 'Feedback'
-    },
     {
       icon: 'unordered-list',
       title: 'History'

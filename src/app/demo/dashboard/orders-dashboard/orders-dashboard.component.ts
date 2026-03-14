@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { forkJoin, of, Observable } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
@@ -6,6 +6,7 @@ import { OrderService } from '../../../services/order.service';
 import { WooCommerceService, WooCommerceStore } from '../../../services/woocommerce.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from './order-detail-modal.component';
+import { RouteSearchService } from '../../../theme/shared/service/route-search.service';
 
 @Component({
   selector: 'app-orders-dashboard',
@@ -239,6 +240,7 @@ export class OrdersDashboardComponent implements OnInit {
   availableStores = signal<WooCommerceStore[]>([]);
   selectedStoreSlugs = signal<string[]>([]);
   private hasFullDataset = signal(false);
+  private routeSearchService = inject(RouteSearchService);
 
   get pageRangeLabel(): string {
     const total = this.apiTotal();
@@ -276,7 +278,13 @@ export class OrdersDashboardComponent implements OnInit {
   constructor(
     private orderService: OrderService,
     private wooCommerceService: WooCommerceService
-  ) {}
+  ) {
+    effect(() => {
+      this.routeSearchService.currentTerm();
+      this.currentPage.set(1);
+      this.applyFilters();
+    });
+  }
 
   ngOnInit() {
     this.loadStores();
@@ -440,10 +448,12 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   private applyFilters() {
+    const searchTerm = this.routeSearchService.currentTerm().trim().toLowerCase();
     const now = new Date();
     const filtered = this.allOrders()
       .filter((order) => this.matchesDataSource(order))
       .filter((order) => this.isWithinSelectedTimeframe(order.created_at, now))
+      .filter((order) => this.matchesSearch(order, searchTerm))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     this.filteredOrders.set(filtered);
@@ -455,6 +465,66 @@ export class OrdersDashboardComponent implements OnInit {
       filtered.filter((order) => [OrderStatus.EN_PROCESO, OrderStatus.EMPAQUETADO, OrderStatus.DESPACHADO, OrderStatus.EN_CAMINO].includes(order.status)).length
     );
     this.errorOrders.set(filtered.filter((order) => order.status === OrderStatus.ERROR).length);
+  }
+
+  private matchesSearch(order: Order, term: string): boolean {
+    if (!term) {
+      return true;
+    }
+
+    const normalizedTerm = this.normalizeDateTerm(term);
+    const ticket = String(order.external_id || '').toLowerCase();
+    const customerName = String(order.customer_name || '').toLowerCase();
+    const createdAtIso = String(order.created_at || '').toLowerCase();
+
+    const createdDate = order.created_at ? new Date(order.created_at) : null;
+    const createdAtShort = createdDate && !isNaN(createdDate.getTime())
+      ? new Intl.DateTimeFormat('es-PE', { dateStyle: 'short' }).format(createdDate).toLowerCase()
+      : '';
+    const createdAtDateOnly = createdDate && !isNaN(createdDate.getTime())
+      ? createdDate.toISOString().split('T')[0].toLowerCase()
+      : '';
+    const createdAtDateCandidates = createdDate && !isNaN(createdDate.getTime())
+      ? this.buildDateSearchCandidates(createdDate)
+      : [];
+
+    return (
+      ticket.includes(term) ||
+      customerName.includes(term) ||
+      createdAtIso.includes(term) ||
+      createdAtShort.includes(term) ||
+      createdAtDateOnly.includes(term) ||
+      createdAtDateCandidates.some((value) => value.includes(normalizedTerm))
+    );
+  }
+
+  private normalizeDateTerm(value: string): string {
+    return (value || '').trim().toLowerCase().replace(/[.\-\s]+/g, '/').replace(/\/+/g, '/');
+  }
+
+  private buildDateSearchCandidates(date: Date): string[] {
+    const year4 = String(date.getFullYear());
+    const year2 = year4.slice(-2);
+    const month = String(date.getMonth() + 1);
+    const day = String(date.getDate());
+    const mm = month.padStart(2, '0');
+    const dd = day.padStart(2, '0');
+
+    return [
+      `${month}/${day}/${year2}`,
+      `${mm}/${dd}/${year2}`,
+      `${day}/${month}/${year2}`,
+      `${dd}/${mm}/${year2}`,
+      `${year2}/${month}/${day}`,
+      `${year2}/${mm}/${dd}`,
+      `${year4}/${month}/${day}`,
+      `${year4}/${mm}/${dd}`,
+      `${year4}-${mm}-${dd}`,
+      `${day}/${month}/${year4}`,
+      `${dd}/${mm}/${year4}`,
+      `${month}/${day}/${year4}`,
+      `${mm}/${dd}/${year4}`
+    ].map((item) => this.normalizeDateTerm(item));
   }
 
   private matchesDataSource(order: Order): boolean {

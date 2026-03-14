@@ -1,9 +1,10 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { OrderService } from '../../../services/order.service';
 import { WooCommerceService, WooCommerceStore } from '../../../services/woocommerce.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/order-detail-modal.component';
+import { RouteSearchService } from '../../../theme/shared/service/route-search.service';
 
 @Component({
   selector: 'app-orders-list',
@@ -146,6 +147,7 @@ import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/orde
 })
 export class OrdersListComponent implements OnInit {
   orders = signal<Order[]>([]);
+  rawOrders = signal<Order[]>([]);
   loading = signal(false);
   currentPage = signal(1);
   lastPage = signal(1);
@@ -156,11 +158,17 @@ export class OrdersListComponent implements OnInit {
   selectedStoreSlugs = signal<string[]>([]);
 
   private readonly itemsPerPage = 100;
+  private routeSearchService = inject(RouteSearchService);
 
   constructor(
     private orderService: OrderService,
     private wooCommerceService: WooCommerceService
-  ) {}
+  ) {
+    effect(() => {
+      const searchTerm = this.routeSearchService.ordersTerm();
+      this.applySearch(searchTerm);
+    });
+  }
 
   ngOnInit() {
     this.loadStores();
@@ -183,7 +191,7 @@ export class OrdersListComponent implements OnInit {
     this.loading.set(true);
     this.orderService.getOrders(this.currentPage(), this.itemsPerPage).subscribe({
       next: (response) => {
-        this.orders.set(response.data);
+        this.setLoadedOrders(response.data || []);
         this.lastPage.set(response.last_page);
         this.loading.set(false);
       },
@@ -205,7 +213,7 @@ export class OrdersListComponent implements OnInit {
         const transformedOrders = (response.data || []).map(wooOrder =>
           this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
         );
-        this.orders.set(transformedOrders);
+        this.setLoadedOrders(transformedOrders);
         this.lastPage.set(response.meta.total_pages || 1);
         this.loading.set(false);
       },
@@ -230,12 +238,12 @@ export class OrdersListComponent implements OnInit {
             );
             const allOrders = [...internalResponse.data, ...wooOrders]
               .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-            this.orders.set(allOrders);
+            this.setLoadedOrders(allOrders);
             this.lastPage.set(Math.max(internalResponse.last_page || 1, wooResponse.meta?.total_pages || 1));
             this.loading.set(false);
           },
           error: () => {
-            this.orders.set(internalResponse.data);
+            this.setLoadedOrders(internalResponse.data || []);
             this.lastPage.set(internalResponse.last_page);
             this.loading.set(false);
           }
@@ -247,12 +255,12 @@ export class OrdersListComponent implements OnInit {
             const wooOrders = (wooResponse.data || []).map(wooOrder =>
               this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
             );
-            this.orders.set(wooOrders);
+            this.setLoadedOrders(wooOrders);
             this.lastPage.set(wooResponse.meta?.total_pages || 1);
             this.loading.set(false);
           },
           error: () => {
-            this.orders.set([]);
+            this.setLoadedOrders([]);
             this.lastPage.set(1);
             this.loading.set(false);
           }
@@ -418,5 +426,87 @@ export class OrdersListComponent implements OnInit {
 
   isNumber(value: any): boolean {
     return typeof value === 'number';
+  }
+
+  private setLoadedOrders(orders: Order[]): void {
+    this.rawOrders.set(orders);
+    this.applySearch(this.routeSearchService.getTermForContext('orders'));
+  }
+
+  private applySearch(rawTerm: string): void {
+    const term = (rawTerm || '').trim().toLowerCase();
+    const sourceOrders = this.rawOrders();
+
+    if (!term) {
+      this.orders.set(sourceOrders);
+      return;
+    }
+
+    const filteredOrders = sourceOrders.filter((order) => this.matchesSearch(order, term));
+    this.orders.set(filteredOrders);
+  }
+
+  private matchesSearch(order: Order, term: string): boolean {
+    const normalizedTerm = this.normalizeDateTerm(term);
+    const ticket = String(order.external_id || '').toLowerCase();
+    const customerName = String(order.customer_name || '').toLowerCase();
+    const createdAtIso = String(order.created_at || '').toLowerCase();
+
+    const createdDate = order.created_at ? new Date(order.created_at) : null;
+    const createdAtShort = createdDate && !isNaN(createdDate.getTime())
+      ? new Intl.DateTimeFormat('es-PE', { dateStyle: 'short' }).format(createdDate).toLowerCase()
+      : '';
+    const createdAtDateOnly = createdDate && !isNaN(createdDate.getTime())
+      ? createdDate.toISOString().split('T')[0].toLowerCase()
+      : '';
+    const createdAtDateCandidates = createdDate && !isNaN(createdDate.getTime())
+      ? this.buildDateSearchCandidates(createdDate)
+      : [];
+
+    return (
+      ticket.includes(term) ||
+      customerName.includes(term) ||
+      createdAtIso.includes(term) ||
+      createdAtShort.includes(term) ||
+      createdAtDateOnly.includes(term) ||
+      createdAtDateCandidates.some((value) => value.includes(normalizedTerm))
+    );
+  }
+
+  private normalizeDateTerm(value: string): string {
+    return (value || '').trim().toLowerCase().replace(/[.\-\s]+/g, '/').replace(/\/+/g, '/');
+  }
+
+  private buildDateSearchCandidates(date: Date): string[] {
+    const year4 = String(date.getFullYear());
+    const year2 = year4.slice(-2);
+    const month = String(date.getMonth() + 1);
+    const day = String(date.getDate());
+    const mm = month.padStart(2, '0');
+    const dd = day.padStart(2, '0');
+
+    return [
+      `${month}/${day}/${year2}`,
+      `${mm}/${dd}/${year2}`,
+      `${day}/${month}/${year2}`,
+      `${dd}/${mm}/${year2}`,
+      `${year2}/${month}/${day}`,
+      `${year2}/${mm}/${dd}`,
+      `${year4}/${month}/${day}`,
+      `${year4}/${mm}/${dd}`,
+      `${year4}-${mm}-${dd}`,
+      `${day}/${month}/${year4}`,
+      `${dd}/${mm}/${year4}`,
+      `${month}/${day}/${year4}`,
+      `${mm}/${dd}/${year4}`
+    ].map((item) => this.normalizeDateTerm(item));
+  }
+
+  private getOrderSearchKeys(order: Order): string[] {
+    return [
+      String(order.external_id || '').toLowerCase(),
+      String(order.id || '').toLowerCase(),
+      String(order.woo_order_id || '').toLowerCase()
+    ].filter(Boolean);
   }
 }
