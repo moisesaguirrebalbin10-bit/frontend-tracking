@@ -6,6 +6,7 @@ import { RouterModule } from '@angular/router';
 // project import
 import { NavigationItem, NavigationItems } from '../navigation';
 import { environment } from 'src/environments/environment';
+import { AuthService } from 'src/app/services/auth.service';
 
 import { NavGroupComponent } from './nav-group/nav-group.component';
 
@@ -20,7 +21,8 @@ import {
   FontSizeOutline,
   ProfileOutline,
   BgColorsOutline,
-  AntDesignOutline
+  AntDesignOutline,
+  TeamOutline
 } from '@ant-design/icons-angular/icons';
 import { NgScrollbarModule } from 'ngx-scrollbar';
 
@@ -34,6 +36,7 @@ export class NavContentComponent implements OnInit {
   private location = inject(Location);
   private locationStrategy = inject(LocationStrategy);
   private iconService = inject(IconService);
+  private authService = inject(AuthService);
 
   // public props
   NavCollapsedMob = output();
@@ -58,11 +61,12 @@ export class NavContentComponent implements OnInit {
         ProfileOutline,
         BgColorsOutline,
         AntDesignOutline,
+        TeamOutline,
         ChromeOutline,
         QuestionOutline
       ]
     );
-    this.navigations = NavigationItems;
+    this.navigations = this.filterNavigationByRole(NavigationItems);
   }
 
   // Life cycle events
@@ -101,5 +105,24 @@ export class NavContentComponent implements OnInit {
     if (this.windowWidth < 1025 && document.querySelector('app-navigation.coded-navbar').classList.contains('mob-open')) {
       this.NavCollapsedMob.emit();
     }
+  }
+
+  private filterNavigationByRole(items: NavigationItem[]): NavigationItem[] {
+    const user = this.authService.getCurrentUser();
+    const currentRole = user?.role;
+
+    return items
+      .map((item) => {
+        const children = item.children ? this.filterNavigationByRole(item.children) : undefined;
+        return {
+          ...item,
+          children
+        };
+      })
+      .filter((item) => {
+        const hasRoleAccess = !item.allowedRoles || (!!currentRole && item.allowedRoles.includes(currentRole));
+        const hasVisibleChildren = !item.children || item.children.length > 0;
+        return hasRoleAccess && hasVisibleChildren;
+      });
   }
 }

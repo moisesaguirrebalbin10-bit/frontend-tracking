@@ -6,18 +6,19 @@ import { RouterModule, Routes } from '@angular/router';
 import { AdminLayout } from './theme/layouts/admin-layout/admin-layout.component';
 import { GuestLayoutComponent } from './theme/layouts/guest-layout/guest-layout.component';
 import { AuthGuard } from './services/auth.guard';
+import { AdminGuard } from './services/admin.guard';
 
 const routes: Routes = [
+  {
+    path: '',
+    redirectTo: '/login',
+    pathMatch: 'full'
+  },
   {
     path: '',
     component: AdminLayout,
     canActivate: [AuthGuard],
     children: [
-      {
-        path: '',
-        redirectTo: '/dashboard/default',
-        pathMatch: 'full'
-      },
       {
         path: 'dashboard/default',
         loadComponent: () => import('./demo/dashboard/orders-dashboard/orders-dashboard.component').then((c) => c.OrdersDashboardComponent)
@@ -34,6 +35,11 @@ const routes: Routes = [
         path: 'orders',
         loadComponent: () => import('./demo/pages/orders/orders-list.component').then((c) => c.OrdersListComponent)
       },
+      {
+        path: 'admin/users',
+        canActivate: [AdminGuard],
+        loadComponent: () => import('./demo/pages/users/users-admin.component').then((c) => c.UsersAdminComponent)
+      }
     ]
   },
   {
@@ -43,13 +49,12 @@ const routes: Routes = [
       {
         path: 'login',
         loadComponent: () => import('./demo/pages/authentication/auth-login/auth-login.component').then((c) => c.AuthLoginComponent)
-      },
-      {
-        path: 'register',
-        loadComponent: () =>
-          import('./demo/pages/authentication/auth-register/auth-register.component').then((c) => c.AuthRegisterComponent)
       }
     ]
+  },
+  {
+    path: '**',
+    redirectTo: '/login'
   }
 ];
 

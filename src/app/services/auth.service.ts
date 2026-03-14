@@ -4,7 +4,7 @@ import { Observable, BehaviorSubject, of, catchError, finalize, throwError } fro
 import { map, switchMap, tap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { LoginRequest, RegisterRequest, AuthResponse, RefreshTokenResponse, LogoutResponse, MeResponse } from '../models/auth.model';
-import { User } from '../models/user.model';
+import { User, UserRole } from '../models/user.model';
 
 @Injectable({
   providedIn: 'root'
@@ -60,8 +60,8 @@ export class AuthService {
     );
   }
 
-  register(userData: RegisterRequest): Observable<any> {
-    return this.http.post(`${this.apiUrl}/users`, userData);
+  register(userData: RegisterRequest): Observable<User> {
+    return this.http.post<User>(`${this.apiUrl}/users`, userData);
   }
 
   logout(): Observable<LogoutResponse> {
@@ -114,6 +114,11 @@ export class AuthService {
 
   getCurrentUser(): User | null {
     return this.currentUserSubject.value;
+  }
+
+  isAdmin(): boolean {
+    const user = this.getCurrentUser();
+    return !!user && (user.role === UserRole.ADMIN || user.is_admin);
   }
 
   clearSession(): void {

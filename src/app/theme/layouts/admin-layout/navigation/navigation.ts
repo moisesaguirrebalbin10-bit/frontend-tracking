@@ -1,3 +1,5 @@
+import { UserRole } from 'src/app/models/user.model';
+
 export interface NavigationItem {
   id: string;
   title: string;
@@ -16,6 +18,7 @@ export interface NavigationItem {
   link?: string;
   description?: string;
   path?: string;
+  allowedRoles?: UserRole[];
 }
 
 export const NavigationItems: NavigationItem[] = [
@@ -54,29 +57,19 @@ export const NavigationItems: NavigationItem[] = [
     ]
   },
   {
-    id: 'authentication',
-    title: 'Authentication',
+    id: 'administration',
+    title: 'Administracion',
     type: 'group',
     icon: 'icon-navigation',
+    allowedRoles: [UserRole.ADMIN],
     children: [
       {
-        id: 'login',
-        title: 'Login',
+        id: 'admin-users',
+        title: 'Usuarios',
         type: 'item',
         classes: 'nav-item',
-        url: '/login',
-        icon: 'login',
-        target: true,
-        breadcrumbs: false
-      },
-      {
-        id: 'register',
-        title: 'Register',
-        type: 'item',
-        classes: 'nav-item',
-        url: '/register',
-        icon: 'profile',
-        target: true,
+        url: '/admin/users',
+        icon: 'team',
         breadcrumbs: false
       }
     ]
