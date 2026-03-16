@@ -556,7 +556,7 @@ export class OrdersDashboardComponent implements OnInit {
     }
 
     if (this.timeframe() === 'week') {
-      return this.isSameWeek(orderDate, referenceDate);
+      return this.isWithinLastDays(orderDate, referenceDate, 7);
     }
 
     if (this.timeframe() === 'range') {
@@ -582,19 +582,12 @@ export class OrdersDashboardComponent implements OnInit {
     return orderDate.getFullYear() === referenceDate.getFullYear() && orderDate.getMonth() === referenceDate.getMonth();
   }
 
-  private isSameWeek(firstDate: Date, secondDate: Date): boolean {
-    const firstWeekStart = this.getWeekStart(firstDate);
-    const secondWeekStart = this.getWeekStart(secondDate);
-    return firstWeekStart.getTime() === secondWeekStart.getTime();
-  }
-
-  private getWeekStart(date: Date): Date {
-    const weekStart = new Date(date);
-    const day = weekStart.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    weekStart.setHours(0, 0, 0, 0);
-    weekStart.setDate(weekStart.getDate() + diff);
-    return weekStart;
+  private isWithinLastDays(orderDate: Date, referenceDate: Date, days: number): boolean {
+    const orderDay = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate());
+    const endDay = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+    const startDay = new Date(endDay);
+    startDay.setDate(startDay.getDate() - (days - 1));
+    return orderDay >= startDay && orderDay <= endDay;
   }
 
   ordersTableTitle(): string {
@@ -608,7 +601,7 @@ export class OrdersDashboardComponent implements OnInit {
     }
     const titles: Record<string, string> = {
       day: 'Pedidos del Día',
-      week: 'Pedidos de la Semana',
+      week: 'Pedidos de los Últimos 7 Días',
       month: 'Pedidos del Mes'
     };
     return titles[this.timeframe()];

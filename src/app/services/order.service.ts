@@ -160,7 +160,8 @@ export class OrderService {
             m.key === '_delivery_date' ||
             m.key === 'delivery_date' ||
             m.key === 'estimated_delivery_date' ||
-            m.key === '_estimated_delivery_date'
+            m.key === '_estimated_delivery_date' ||
+            m.key === '_billing_fecha_entrega'
           );
           if (deliveryMeta?.value) {
             return deliveryMeta.value;
