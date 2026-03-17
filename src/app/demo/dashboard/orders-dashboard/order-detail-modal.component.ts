@@ -14,18 +14,26 @@ import { OrderService } from '../../../services/order.service';
       <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title">Detalles del Pedido #{{ order?.id }}</h5>
+            <h5 class="modal-title">Detalles del Pedido #{{ order?.external_id || order?.id }}</h5>
             <button type="button" class="btn-close" (click)="close()"></button>
           </div>
           <div class="modal-body" *ngIf="order">
             <!-- Tracking Timeline -->
             <div class="mb-4">
               <h6 class="text-muted mb-3">Estado del Pedido - Haz click en los círculos para cambiar estado</h6>
+              <div class="alert alert-info py-2 px-3 small mb-3">
+                En Proceso y Entregado sincronizan con WooCommerce. Empaquetado, Despachado y En Camino son cambios internos. Si marcas error (✕), se cancela en Woo y se registra auditoría con motivo.
+              </div>
               <app-order-tracking 
                 [currentStatus]="order.status" 
                 [errorReason]="order.error_reason"
+                [canEdit]="canEditOrderStatus(order)"
                 (statusSelected)="onStatusSelected($event)">
               </app-order-tracking>
+
+              <div class="alert alert-warning py-2 px-3 small mb-0" *ngIf="!canEditOrderStatus(order)">
+                {{ order.update_status_message || 'Este pedido viene directo de WooCommerce y todavia no existe en la tabla local. Sincronizalo para poder cambiar estado.' }}
+              </div>
             </div>
 
             <hr>
@@ -101,6 +109,10 @@ import { OrderService } from '../../../services/order.service';
             <div *ngIf="order.status === 'ERROR' && order.error_reason" class="alert alert-danger mt-3 mb-0">
               <strong>Motivo del Error:</strong> {{ order.error_reason }}
             </div>
+
+            <div *ngIf="statusUpdateError" class="alert alert-danger mt-3 mb-0">
+              {{ statusUpdateError }}
+            </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" (click)="close()" [disabled]="isLoading">Cerrar</button>
@@ -123,6 +135,7 @@ export class OrderDetailModalComponent implements OnChanges {
   @Output() closeModal = new EventEmitter<void>();
 
   isLoading = false;
+  statusUpdateError = '';
 
   constructor(
     private orderService: OrderService,
@@ -131,21 +144,78 @@ export class OrderDetailModalComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges) {}
 
-  onStatusSelected(event: { status: string; confirmed: boolean; errorReason?: string }) {
+  onStatusSelected(event: { status: string; confirmed: boolean; errorReason?: string; evidenceImage?: File }) {
     if (!event.confirmed || !this.order) return;
+    if (!this.canEditOrderStatus(this.order)) {
+      this.statusUpdateError = this.order.update_status_message || 'Este pedido no se puede actualizar hasta sincronizarse con la base local.';
+      return;
+    }
 
+    this.statusUpdateError = '';
     this.isLoading = true;
     this.cdr.markForCheck();
 
+    const resolvedOrderId = this.getOrderIdForStatusUpdate(this.order);
+
+    if (!resolvedOrderId && this.isWooOrder(this.order)) {
+      const lookupKey = this.order.external_id || this.order.woo_order_id || this.order.id;
+      this.orderService.findInternalOrderIdByExternalId(lookupKey).subscribe({
+        next: (internalId) => {
+          if (!internalId) {
+            this.statusUpdateError = 'No se encontro el pedido en la tabla local. Ejecuta sincronizacion y vuelve a intentar.';
+            this.isLoading = false;
+            this.cdr.markForCheck();
+            return;
+          }
+
+          this.order = {
+            ...this.order!,
+            internal_order_id: internalId
+          };
+
+          this.executeStatusUpdate(internalId, event);
+        },
+        error: () => {
+          this.statusUpdateError = 'No se pudo validar el id interno del pedido antes de actualizar estado.';
+          this.isLoading = false;
+          this.cdr.markForCheck();
+        }
+      });
+      return;
+    }
+
+    if (!resolvedOrderId) {
+      this.statusUpdateError = 'No hay id interno para actualizar estado. Sincroniza el pedido Woo con la base local.';
+      this.isLoading = false;
+      this.cdr.markForCheck();
+      return;
+    }
+
+    this.executeStatusUpdate(resolvedOrderId, event);
+  }
+
+  private executeStatusUpdate(updateOrderId: number, event: { status: string; confirmed: boolean; errorReason?: string; evidenceImage?: File }) {
+
     this.orderService.updateOrderStatus(
-      this.order.id,
+      updateOrderId,
       event.status as any,
-      event.errorReason
+      {
+        errorReason: event.errorReason,
+        evidenceImage: event.evidenceImage
+      }
     ).subscribe({
       next: (response) => {
         console.log(`Estado actualizado a ${this.getStatusLabel(event.status)}`);
-        this.order!.status = event.status as any;
-        if (event.errorReason) this.order!.error_reason = event.errorReason;
+        this.order = {
+          ...this.order!,
+          ...response,
+          status: (response?.status || event.status) as any
+        };
+
+        if (event.status !== 'ERROR') {
+          this.order.error_reason = response?.error_reason || '';
+        }
+
         this.isLoading = false;
         this.cdr.markForCheck();
       },
@@ -153,14 +223,55 @@ export class OrderDetailModalComponent implements OnChanges {
         console.error('Error al actualizar el estado:', error);
         console.error('Status:', error.status);
         console.error('Response:', error.error);
+
+        if (error.status === 404) {
+          this.statusUpdateError = 'No se encontro el pedido en la tabla local. Sincroniza pedidos con el backend y vuelve a intentar.';
+        } else {
+          this.statusUpdateError = error?.error?.message || 'No se pudo actualizar el estado del pedido.';
+        }
+
         this.isLoading = false;
         this.cdr.markForCheck();
       }
     });
   }
 
+  private getOrderIdForStatusUpdate(order: Order): number | null {
+    if (order.internal_order_id) {
+      return order.internal_order_id;
+    }
+
+    const idValue = Number(order.id);
+    const externalNumeric = Number(order.external_id);
+    const looksLikeWooDirectId = !Number.isNaN(idValue) && !Number.isNaN(externalNumeric) && idValue === externalNumeric;
+
+    // When data comes from local DB, id is local and typically differs from external_id.
+    if (!looksLikeWooDirectId && idValue > 0) {
+      return idValue;
+    }
+
+    if (this.isWooOrder(order)) {
+      return null;
+    }
+
+    return null;
+  }
+
+  private isWooOrder(order: Order): boolean {
+    return order.source === 'woocommerce' || !!order.store_slug || !!order.woo_order_id;
+  }
+
+  canEditOrderStatus(order: Order | null): boolean {
+    if (!order) return false;
+    return this.getOrderIdForStatusUpdate(order) !== null;
+  }
+
   getOrderSource(order?: Order): string {
     if (!order) return 'Desconocido';
+
+    if (order.store_slug) {
+      return order.store_slug;
+    }
 
     if (order.woo_source || order.source === 'woocommerce' || order.store_slug) {
       return order.woo_source || 'WooCommerce';

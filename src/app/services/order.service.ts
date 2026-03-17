@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, of } from 'rxjs';
+import { map, switchMap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { Order, OrderStatus, OrderTimeline, OrderLog } from '../models/order.model';
 import { WooCommerceService, WooCommerceOrder, WooCommerceOrdersFilters, WooCommerceOrdersResponse } from './woocommerce.service';
@@ -35,19 +35,45 @@ export class OrderService {
     return this.http.get<Order>(`${this.apiUrl}/orders/${id}`);
   }
 
-  updateOrderStatus(id: number, status: OrderStatus, errorReason?: string, deliveryImage?: File): Observable<Order> {
+  findInternalOrderIdByExternalId(
+    externalId: string | number,
+    perPage: number = 100,
+    maxPages: number = 25
+  ): Observable<number | null> {
+    const target = String(externalId ?? '').trim();
+    if (!target) {
+      return of(null);
+    }
+
+    return this.findInternalOrderIdByExternalIdPage(target, 1, perPage, maxPages);
+  }
+
+  updateOrderStatus(
+    id: number,
+    status: OrderStatus,
+    options?: { errorReason?: string; evidenceImage?: File }
+  ): Observable<Order> {
     // Convert status to lowercase with underscores: EN_PROCESO → en_proceso
     const statusValue = status.toLowerCase();
-    
+    const errorReason = options?.errorReason;
+    const evidenceImage = options?.evidenceImage;
+
     const body: any = { status: statusValue };
     if (errorReason) body.error_reason = errorReason;
 
     // Only use FormData if there's an image to upload
-    if (deliveryImage) {
+    if (evidenceImage) {
       const formData = new FormData();
       formData.append('status', statusValue);
       if (errorReason) formData.append('error_reason', errorReason);
-      formData.append('delivery_image', deliveryImage);
+
+      // Keep compatibility with backend aliases for evidence uploads.
+      if (status === OrderStatus.ENTREGADO) {
+        formData.append('delivery_image', evidenceImage);
+      } else {
+        formData.append('evidence_image', evidenceImage);
+      }
+
       return this.http.put<Order>(`${this.apiUrl}/orders/${id}/status`, formData);
     }
 
@@ -207,5 +233,44 @@ export class OrderService {
     };
 
     return statusMap[wooStatus] || OrderStatus.EN_PROCESO;
+  }
+
+  private findInternalOrderIdByExternalIdPage(
+    targetExternalId: string,
+    page: number,
+    perPage: number,
+    maxPages: number
+  ): Observable<number | null> {
+    return this.getOrders(page, perPage).pipe(
+      map((response) => {
+        const targetNumeric = Number(targetExternalId);
+        const match = (response.data || []).find((order) => {
+          if (String(order.external_id ?? '').trim() === targetExternalId) {
+            return true;
+          }
+          if (!Number.isNaN(targetNumeric) && order.woo_order_id === targetNumeric) {
+            return true;
+          }
+          return false;
+        });
+
+        return {
+          matchId: match?.id ?? null,
+          lastPage: response.last_page || page
+        };
+      }),
+      switchMap(({ matchId, lastPage }) => {
+        if (matchId) {
+          return of(matchId);
+        }
+
+        const hasNext = page < lastPage && page < maxPages;
+        if (!hasNext) {
+          return of(null);
+        }
+
+        return this.findInternalOrderIdByExternalIdPage(targetExternalId, page + 1, perPage, maxPages);
+      })
+    );
   }
 }

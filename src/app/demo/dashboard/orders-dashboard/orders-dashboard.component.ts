@@ -3,10 +3,14 @@ import { CommonModule } from '@angular/common';
 import { forkJoin, of, Observable } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
 import { OrderService } from '../../../services/order.service';
-import { WooCommerceService, WooCommerceStore } from '../../../services/woocommerce.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from './order-detail-modal.component';
 import { RouteSearchService } from '../../../theme/shared/service/route-search.service';
+
+interface StoreFilterOption {
+  slug: string;
+  label: string;
+}
 
 @Component({
   selector: 'app-orders-dashboard',
@@ -24,10 +28,17 @@ import { RouteSearchService } from '../../../theme/shared/service/route-search.s
           </div>
         </div>
         <div class="col-xl-6 col-md-6">
-          <div class="btn-group w-100" role="group">
-            <button type="button" class="btn" [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('all')">Todos</button>
-            <button type="button" class="btn" [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('internal')">Internos</button>
-            <button type="button" class="btn" [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('woocommerce')">WooCommerce</button>
+          <div class="d-flex align-items-center gap-2 w-100">
+            <div class="btn-group flex-grow-1" role="group">
+              <button type="button" class="btn" [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('all')">Todos</button>
+              <button type="button" class="btn" [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('internal')">Internos</button>
+              <button type="button" class="btn" [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('woocommerce')">WooCommerce</button>
+            </div>
+            <button class="btn btn-outline-secondary" (click)="loadAllOrdersOnce(true)" [disabled]="loading()" title="Recargar pedidos desde el servidor" style="white-space:nowrap">
+              <span *ngIf="loading()" class="spinner-border spinner-border-sm me-1" role="status"></span>
+              <i *ngIf="!loading()" class="ti ti-refresh me-1"></i>
+              Recargar
+            </button>
           </div>
         </div>
       </div>
@@ -154,8 +165,8 @@ import { RouteSearchService } from '../../../theme/shared/service/route-search.s
                       <td><small>{{ order.delivery_location || '-' }}</small></td>
                       <td>$ {{ order.total }}</td>
                       <td>
-                        <span class="badge" [ngClass]="getStatusClass(order.status)">
-                          {{ order.status }}
+                        <span class="badge" [ngClass]="getStatusClassForOrder(order)">
+                          {{ getStatusLabel(order) }}
                         </span>
                       </td>
                       <td>
@@ -237,7 +248,7 @@ export class OrdersDashboardComponent implements OnInit {
 
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
-  availableStores = signal<WooCommerceStore[]>([]);
+  availableStores = signal<StoreFilterOption[]>([]);
   selectedStoreSlugs = signal<string[]>([]);
   private hasFullDataset = signal(false);
   private routeSearchService = inject(RouteSearchService);
@@ -276,8 +287,7 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   constructor(
-    private orderService: OrderService,
-    private wooCommerceService: WooCommerceService
+    private orderService: OrderService
   ) {
     effect(() => {
       this.routeSearchService.currentTerm();
@@ -287,8 +297,7 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   ngOnInit() {
-    this.loadStores();
-    this.loadAllOrdersOnce(false);
+    this.loadAllOrdersOnce(true);
   }
 
   setTimeframe(tf: 'day' | 'week' | 'month' | 'range') {
@@ -357,21 +366,15 @@ export class OrdersDashboardComponent implements OnInit {
     return this.selectedStoreSlugs().includes(slug);
   }
 
-  private loadStores() {
-    this.wooCommerceService.listStores().subscribe(stores => this.availableStores.set(stores));
-  }
-
-  private loadAllOrdersOnce(fullData: boolean) {
+  loadAllOrdersOnce(fullData: boolean) {
     this.loading.set(true);
     this.hasFullDataset.set(fullData);
 
-    forkJoin({
-      internal: this.fetchAllInternalOrders(fullData),
-      woo: this.fetchAllWooOrders(fullData)
-    }).subscribe({
-      next: ({ internal, woo }) => {
-        const mergedOrders = [...internal, ...woo].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        this.allOrders.set(mergedOrders);
+    this.fetchAllInternalOrders(fullData).subscribe({
+      next: (orders) => {
+        const sortedOrders = [...orders].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        this.allOrders.set(sortedOrders);
+        this.refreshAvailableStores(sortedOrders);
         this.applyFilters();
         this.loading.set(false);
       },
@@ -381,45 +384,6 @@ export class OrdersDashboardComponent implements OnInit {
         this.loading.set(false);
       }
     });
-  }
-
-  private fetchAllWooOrders(fullData: boolean): Observable<Order[]> {
-    const stores = this.selectedStoreSlugs();
-    const filters = stores.length ? { stores } : undefined;
-
-    return this.orderService.getWooCommerceOrders(1, this.pageSize, filters).pipe(
-      switchMap(firstPage => {
-        const firstOrders = (firstPage.data || []).map((wooOrder) =>
-          this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
-        );
-
-        if (!fullData) {
-          return of(firstOrders);
-        }
-
-        const lastPage = firstPage.meta?.total_pages || 1;
-        if (lastPage <= 1) {
-          return of(firstOrders);
-        }
-
-        const remaining = Array.from({ length: lastPage - 1 }, (_, i) =>
-          this.orderService.getWooCommerceOrders(i + 2, this.pageSize, filters).pipe(
-            map(response => (response.data || []).map((wooOrder) =>
-              this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
-            )),
-            catchError(() => of([]))
-          )
-        );
-
-        return forkJoin(remaining).pipe(
-          map(pages => [...firstOrders, ...pages.flatMap(page => page)])
-        );
-      }),
-      catchError(err => {
-        console.error('Error loading WooCommerce orders for dashboard', err);
-        return of([]);
-      })
-    );
   }
 
   private fetchAllInternalOrders(fullData: boolean): Observable<Order[]> {
@@ -445,6 +409,24 @@ export class OrdersDashboardComponent implements OnInit {
         return of([]);
       })
     );
+  }
+
+  private refreshAvailableStores(orders: Order[]) {
+    const mapBySlug = new Map<string, StoreFilterOption>();
+
+    for (const order of orders) {
+      const slug = (order.store_slug || '').trim();
+      if (!slug) continue;
+
+      if (!mapBySlug.has(slug)) {
+        mapBySlug.set(slug, {
+          slug,
+          label: slug
+        });
+      }
+    }
+
+    this.availableStores.set(Array.from(mapBySlug.values()).sort((a, b) => a.label.localeCompare(b.label)));
   }
 
   private applyFilters() {
@@ -619,24 +601,74 @@ export class OrdersDashboardComponent implements OnInit {
     return date;
   }
 
-  getStatusClass(status: OrderStatus): string {
-    switch (status) {
-      case OrderStatus.ENTREGADO:
-        return 'bg-success';
-      case OrderStatus.ERROR:
-        return 'bg-danger';
-      case OrderStatus.CANCELADO:
-        return 'bg-secondary';
-      case OrderStatus.EN_CAMINO:
-        return 'bg-info';
-      case OrderStatus.DESPACHADO:
-        return 'bg-primary';
-      default:
-        return 'bg-warning';
+  getStatusClass(status: OrderStatus | string): string {
+    switch ((status as string)?.toUpperCase()) {
+      case 'ENTREGADO': return 'bg-success';
+      case 'ERROR':
+      case 'ERROR_EN_PEDIDO': return 'bg-danger';
+      case 'CANCELADO': return 'bg-secondary';
+      case 'EN_CAMINO': return 'bg-info';
+      case 'DESPACHADO': return 'bg-primary';
+      case 'EMPAQUETADO':
+      case 'EN_PROCESO': return 'bg-warning';
+      default: return 'bg-warning';
     }
   }
 
+  /** Devuelve la etiqueta legible del estado, priorizando woo_status_label/woo_status del backend */
+  getStatusLabel(order: Order): string {
+    const effectiveWooStatus = order.woo_status || order.meta?.status;
+    const isEnProceso = (order.status as string)?.toUpperCase() === 'EN_PROCESO';
+    // Si el backend ya envía la etiqueta traducida, usarla directamente
+    if (order.woo_status_label && isEnProceso) {
+      return order.woo_status_label;
+    }
+    if (effectiveWooStatus && isEnProceso) {
+      const wooLabels: Record<string, string> = {
+        'pending':    'Pendiente de Pago',
+        'processing': 'En Proceso',
+        'on-hold':    'En Espera',
+        'completed':  'Completado',
+        'cancelled':  'Cancelado',
+        'refunded':   'Reembolsado',
+        'failed':     'Fallido'
+      };
+      return wooLabels[effectiveWooStatus] ?? effectiveWooStatus;
+    }
+    const internalLabels: Record<string, string> = {
+      'EN_PROCESO':      'En Proceso',
+      'EMPAQUETADO':     'Empaquetado',
+      'DESPACHADO':      'Despachado',
+      'EN_CAMINO':       'En Camino',
+      'ENTREGADO':       'Entregado',
+      'ERROR':           'Error',
+      'ERROR_EN_PEDIDO': 'Error en Pedido',
+      'CANCELADO':       'Cancelado'
+    };
+    return internalLabels[(order.status as string)?.toUpperCase()] ?? order.status;
+  }
+
+  /** Color del badge usando woo_status cuando aplica */
+  getStatusClassForOrder(order: Order): string {
+    const effectiveWooStatus = order.woo_status || order.meta?.status;
+    const isEnProceso = (order.status as string)?.toUpperCase() === 'EN_PROCESO';
+    if (effectiveWooStatus && isEnProceso) {
+      const wooColors: Record<string, string> = {
+        'pending':    'bg-secondary',
+        'processing': 'bg-warning',
+        'on-hold':    'bg-info text-dark',
+        'failed':     'bg-danger'
+      };
+      return wooColors[effectiveWooStatus] ?? 'bg-warning';
+    }
+    return this.getStatusClass(order.status);
+  }
+
   getOrderSource(order: Order): 'web' | 'redes' | 'woocommerce' | null {
+    if (order.store_slug) {
+      return 'woocommerce';
+    }
+
     if (order.source === 'woocommerce') {
       return 'woocommerce';
     }
@@ -659,6 +691,10 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   getSourceDisplay(order: Order): string {
+    if (order.store_slug) {
+      return order.store_slug;
+    }
+
     if (order.woo_source) {
       return order.woo_source;
     }

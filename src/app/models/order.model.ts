@@ -33,8 +33,14 @@ export interface Order {
   store_slug?: string;
   woo_source?: string; // Store name/url
   woo_status?: string; // WooCommerce status (pending, processing, on-hold, completed, cancelled, refunded)
+  woo_status_label?: string; // Etiqueta legible enviada por el backend (ej: "Pendiente de Pago")
   woo_order_number?: string;
   woo_order_id?: number;
+
+  // Frontend helper fields for Woo/internal reconciliation.
+  internal_order_id?: number;
+  can_update_status?: boolean;
+  update_status_message?: string;
 }
 
 export interface OrderItem {

@@ -10,20 +10,33 @@ import { FormsModule } from '@angular/forms';
     <div class="tracking-timeline">
       <div class="tracking-step" 
         *ngFor="let step of trackingSteps"
-        [ngClass]="{ 'completed': isCompleted(step), 'active': isActive(step), 'error': step === 'ERROR', 'clickable': true }"
+        [ngClass]="{ 'completed': isCompleted(step), 'active': isActive(step), 'error': step === 'ERROR', 'clickable': canEdit, 'disabled': !canEdit }"
         (click)="selectStatus(step)">
         <div class="tracking-circle">
           <i [ngClass]="getIcon(step)"></i>
-          <div class="status-actions" *ngIf="selectedEditStatus === step && selectedEditStatus !== 'ERROR'">
+          <div class="status-actions" *ngIf="selectedEditStatus === step">
             <button type="button" class="btn-action btn-success" (click)="confirmStatus(step, $event)" title="Completado">✓</button>
             <button type="button" class="btn-action btn-danger" (click)="markAsError(step, $event)" title="Error">✕</button>
           </div>
-          <div class="status-actions" *ngIf="selectedEditStatus === step && selectedEditStatus === 'ERROR'">
-            <button type="button" class="btn-action btn-danger" (click)="confirmError(step, $event)" title="Confirmar Error">✓</button>
-            <button type="button" class="btn-action btn-secondary" (click)="cancelSelection($event)" title="Cancelar">✕</button>
-          </div>
         </div>
         <div class="tracking-label">{{ getLabel(step) }}</div>
+      </div>
+    </div>
+
+    <!-- Delivered Form Modal -->
+    <div class="error-form-overlay" *ngIf="showDeliveryForm" (click)="cancelDelivered()">
+      <div class="error-form-content" (click)="$event.stopPropagation()">
+        <h6>Confirmar Entrega</h6>
+        <p class="text-muted small mb-3">Este cambio actualizara WooCommerce como <strong>Completado</strong>. Puedes adjuntar evidencia (opcional).</p>
+        <div class="mb-3">
+          <label class="form-label small mb-1">Imagen de evidencia (opcional)</label>
+          <input class="form-control form-control-sm" type="file" accept="image/*" (change)="onFileSelected($event)">
+          <div class="selected-file" *ngIf="selectedImageName">Archivo: {{ selectedImageName }}</div>
+        </div>
+        <div class="d-flex gap-2 justify-content-end">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="cancelDelivered()">Cancelar</button>
+          <button type="button" class="btn btn-success btn-sm" (click)="submitDelivered()">Confirmar Entrega</button>
+        </div>
       </div>
     </div>
     
@@ -37,6 +50,11 @@ import { FormsModule } from '@angular/forms';
           placeholder="Describa el motivo del error aquí..."
           [(ngModel)]="formErrorReason"
           rows="4"></textarea>
+        <div class="mb-3">
+          <label class="form-label small mb-1">Imagen de evidencia (opcional)</label>
+          <input class="form-control form-control-sm" type="file" accept="image/*" (change)="onFileSelected($event)">
+          <div class="selected-file" *ngIf="selectedImageName">Archivo: {{ selectedImageName }}</div>
+        </div>
         <div class="d-flex gap-2 justify-content-end">
           <button type="button" class="btn btn-secondary btn-sm" (click)="cancelError()">Cancelar</button>
           <button type="button" class="btn btn-danger btn-sm" (click)="submitError()" [disabled]="!formErrorReason.trim()">Registrar Error</button>
@@ -63,6 +81,11 @@ import { FormsModule } from '@angular/forms';
 
     .tracking-step.clickable {
       cursor: pointer;
+    }
+
+    .tracking-step.disabled {
+      cursor: not-allowed;
+      opacity: 0.75;
     }
 
     .tracking-step:not(:last-child)::after {
@@ -231,6 +254,12 @@ import { FormsModule } from '@angular/forms';
       color: #1f2937;
     }
 
+    .selected-file {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #6b7280;
+    }
+
     textarea.form-control {
       resize: vertical;
       font-family: inherit;
@@ -240,7 +269,8 @@ import { FormsModule } from '@angular/forms';
 export class OrderTrackingComponent {
   @Input() currentStatus!: string;
   @Input() errorReason?: string;
-  @Output() statusSelected = new EventEmitter<{ status: string; confirmed: boolean; errorReason?: string }>();
+  @Input() canEdit = true;
+  @Output() statusSelected = new EventEmitter<{ status: string; confirmed: boolean; errorReason?: string; evidenceImage?: File }>();
 
   trackingSteps: string[] = [
     'EN_PROCESO',
@@ -252,52 +282,88 @@ export class OrderTrackingComponent {
 
   selectedEditStatus: string | null = null;
   showErrorForm = false;
+  showDeliveryForm = false;
+  selectedImageFile: File | null = null;
+  selectedImageName = '';
   formErrorReason = '';
 
   selectStatus(step: string) {
+    if (!this.canEdit) return;
     this.selectedEditStatus = this.selectedEditStatus === step ? null : step;
   }
 
   confirmStatus(status: string, event: Event) {
     event.stopPropagation();
+
+    if (status === 'ENTREGADO') {
+      this.showDeliveryForm = true;
+      this.selectedImageFile = null;
+      this.selectedImageName = '';
+      return;
+    }
+
     this.statusSelected.emit({ status, confirmed: true });
     this.selectedEditStatus = null;
   }
 
   markAsError(status: string, event: Event) {
     event.stopPropagation();
-    this.selectedEditStatus = 'ERROR';
     this.showErrorForm = true;
+    this.selectedEditStatus = status;
+    this.selectedImageFile = null;
+    this.selectedImageName = '';
     this.formErrorReason = '';
-  }
-
-  confirmError(status: string, event: Event) {
-    event.stopPropagation();
-    this.selectedEditStatus = null;
   }
 
   submitError() {
     if (!this.formErrorReason.trim()) return;
-    
+
     this.statusSelected.emit({ 
       status: 'ERROR', 
       confirmed: true, 
-      errorReason: this.formErrorReason 
+      errorReason: this.formErrorReason,
+      evidenceImage: this.selectedImageFile || undefined
     });
     this.showErrorForm = false;
     this.selectedEditStatus = null;
+    this.selectedImageFile = null;
+    this.selectedImageName = '';
     this.formErrorReason = '';
   }
 
   cancelError() {
     this.showErrorForm = false;
     this.selectedEditStatus = null;
+    this.selectedImageFile = null;
+    this.selectedImageName = '';
     this.formErrorReason = '';
   }
 
-  cancelSelection(event: Event) {
-    event.stopPropagation();
+  submitDelivered() {
+    this.statusSelected.emit({
+      status: 'ENTREGADO',
+      confirmed: true,
+      evidenceImage: this.selectedImageFile || undefined
+    });
+
+    this.showDeliveryForm = false;
     this.selectedEditStatus = null;
+    this.selectedImageFile = null;
+    this.selectedImageName = '';
+  }
+
+  cancelDelivered() {
+    this.showDeliveryForm = false;
+    this.selectedEditStatus = null;
+    this.selectedImageFile = null;
+    this.selectedImageName = '';
+  }
+
+  onFileSelected(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const file = target.files?.[0] || null;
+    this.selectedImageFile = file;
+    this.selectedImageName = file?.name || '';
   }
 
   isCompleted(step: string): boolean {

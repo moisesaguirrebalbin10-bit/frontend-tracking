@@ -1,10 +1,16 @@
 import { Component, OnInit, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { forkJoin, Observable, of } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { OrderService } from '../../../services/order.service';
-import { WooCommerceService, WooCommerceStore } from '../../../services/woocommerce.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/order-detail-modal.component';
 import { RouteSearchService } from '../../../theme/shared/service/route-search.service';
+
+interface StoreFilterOption {
+  slug: string;
+  label: string;
+}
 
 @Component({
   selector: 'app-orders-list',
@@ -18,19 +24,26 @@ import { RouteSearchService } from '../../../theme/shared/service/route-search.s
             <div class="card-header">
               <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <h5 class="mb-0">Pedidos</h5>
-                <div class="btn-group" role="group">
-                  <button type="button"
-                    class="btn btn-sm"
-                    [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'"
-                    (click)="setDataSource('internal')">Internos</button>
-                  <button type="button"
-                    class="btn btn-sm"
-                    [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'"
-                    (click)="setDataSource('woocommerce')">WooCommerce</button>
-                  <button type="button"
-                    class="btn btn-sm"
-                    [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'"
-                    (click)="setDataSource('all')">Todos</button>
+                <div class="d-flex align-items-center gap-2">
+                  <button class="btn btn-sm btn-outline-secondary" (click)="loadOrders()" [disabled]="loading()" title="Recargar pedidos desde el servidor">
+                    <span *ngIf="loading()" class="spinner-border spinner-border-sm me-1" role="status"></span>
+                    <i *ngIf="!loading()" class="ti ti-refresh me-1"></i>
+                    Recargar
+                  </button>
+                  <div class="btn-group" role="group">
+                    <button type="button"
+                      class="btn btn-sm"
+                      [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'"
+                      (click)="setDataSource('internal')">Internos</button>
+                    <button type="button"
+                      class="btn btn-sm"
+                      [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'"
+                      (click)="setDataSource('woocommerce')">WooCommerce</button>
+                    <button type="button"
+                      class="btn btn-sm"
+                      [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'"
+                      (click)="setDataSource('all')">Todos</button>
+                  </div>
                 </div>
               </div>
               <div class="d-flex align-items-center gap-2 flex-wrap mt-2"
@@ -76,8 +89,8 @@ import { RouteSearchService } from '../../../theme/shared/service/route-search.s
                       </td>
                       <td>$ {{ order.total }}</td>
                       <td>
-                        <span class="badge" [ngClass]="getStatusClass(order.status)">
-                          {{ order.status }}
+                        <span class="badge" [ngClass]="getStatusClassForOrder(order)">
+                          {{ getStatusLabel(order) }}
                         </span>
                       </td>
                       <td>
@@ -147,6 +160,7 @@ import { RouteSearchService } from '../../../theme/shared/service/route-search.s
 })
 export class OrdersListComponent implements OnInit {
   orders = signal<Order[]>([]);
+  allOrders = signal<Order[]>([]);
   rawOrders = signal<Order[]>([]);
   loading = signal(false);
   currentPage = signal(1);
@@ -154,15 +168,14 @@ export class OrdersListComponent implements OnInit {
   dataSource = signal<'internal' | 'woocommerce' | 'all'>('all');
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
-  availableStores = signal<WooCommerceStore[]>([]);
+  availableStores = signal<StoreFilterOption[]>([]);
   selectedStoreSlugs = signal<string[]>([]);
 
   private readonly itemsPerPage = 100;
   private routeSearchService = inject(RouteSearchService);
 
   constructor(
-    private orderService: OrderService,
-    private wooCommerceService: WooCommerceService
+    private orderService: OrderService
   ) {
     effect(() => {
       const searchTerm = this.routeSearchService.ordersTerm();
@@ -171,28 +184,16 @@ export class OrdersListComponent implements OnInit {
   }
 
   ngOnInit() {
-    this.loadStores();
     this.loadOrders();
   }
 
   loadOrders() {
-    const source = this.dataSource();
-    
-    if (source === 'internal') {
-      this.loadInternalOrders();
-    } else if (source === 'woocommerce') {
-      this.loadWooCommerceOrders();
-    } else {
-      this.loadAllOrders();
-    }
-  }
-
-  private loadInternalOrders() {
     this.loading.set(true);
-    this.orderService.getOrders(this.currentPage(), this.itemsPerPage).subscribe({
-      next: (response) => {
-        this.setLoadedOrders(response.data || []);
-        this.lastPage.set(response.last_page);
+    this.fetchAllInternalOrders().subscribe({
+      next: (orders) => {
+        this.allOrders.set(this.sortOrdersByCreatedAtDesc(orders));
+        this.refreshAvailableStores(this.allOrders());
+        this.applySourceAndStoreFilters();
         this.loading.set(false);
       },
       error: (error) => {
@@ -202,78 +203,11 @@ export class OrdersListComponent implements OnInit {
     });
   }
 
-  private loadWooCommerceOrders() {
-    this.loading.set(true);
-    const storeFilter = this.selectedStoreSlugs();
-    this.orderService.getWooCommerceOrders(
-      this.currentPage(), this.itemsPerPage,
-      storeFilter.length ? { stores: storeFilter } : undefined
-    ).subscribe({
-      next: (response) => {
-        const transformedOrders = (response.data || []).map(wooOrder =>
-          this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
-        );
-        this.setLoadedOrders(transformedOrders);
-        this.lastPage.set(response.meta.total_pages || 1);
-        this.loading.set(false);
-      },
-      error: (error) => {
-        console.error('Error loading WooCommerce orders', error);
-        this.loading.set(false);
-      }
-    });
-  }
-
-  private loadAllOrders() {
-    this.loading.set(true);
-    const storeFilter = this.selectedStoreSlugs();
-    const wooFilters = storeFilter.length ? { stores: storeFilter } : undefined;
-
-    this.orderService.getOrders(this.currentPage(), this.itemsPerPage).subscribe({
-      next: (internalResponse) => {
-        this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage, wooFilters).subscribe({
-          next: (wooResponse) => {
-            const wooOrders = (wooResponse.data || []).map(wooOrder =>
-              this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
-            );
-            const allOrders = [...internalResponse.data, ...wooOrders]
-              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-            this.setLoadedOrders(allOrders);
-            this.lastPage.set(Math.max(internalResponse.last_page || 1, wooResponse.meta?.total_pages || 1));
-            this.loading.set(false);
-          },
-          error: () => {
-            this.setLoadedOrders(internalResponse.data || []);
-            this.lastPage.set(internalResponse.last_page);
-            this.loading.set(false);
-          }
-        });
-      },
-      error: () => {
-        this.orderService.getWooCommerceOrders(this.currentPage(), this.itemsPerPage, wooFilters).subscribe({
-          next: (wooResponse) => {
-            const wooOrders = (wooResponse.data || []).map(wooOrder =>
-              this.orderService.transformWooCommerceOrder(wooOrder, wooOrder.store_label)
-            );
-            this.setLoadedOrders(wooOrders);
-            this.lastPage.set(wooResponse.meta?.total_pages || 1);
-            this.loading.set(false);
-          },
-          error: () => {
-            this.setLoadedOrders([]);
-            this.lastPage.set(1);
-            this.loading.set(false);
-          }
-        });
-      }
-    });
-  }
-
   setDataSource(source: 'internal' | 'woocommerce' | 'all') {
     this.dataSource.set(source);
     this.selectedStoreSlugs.set([]);
     this.currentPage.set(1);
-    this.loadOrders();
+    this.applySourceAndStoreFilters();
   }
 
   toggleStore(slug: string) {
@@ -281,32 +215,94 @@ export class OrdersListComponent implements OnInit {
     const idx = current.indexOf(slug);
     this.selectedStoreSlugs.set(idx >= 0 ? current.filter(s => s !== slug) : [...current, slug]);
     this.currentPage.set(1);
-    this.loadOrders();
+    this.applySourceAndStoreFilters();
   }
 
   clearStoreFilter() {
     this.selectedStoreSlugs.set([]);
     this.currentPage.set(1);
-    this.loadOrders();
+    this.applySourceAndStoreFilters();
   }
 
   isStoreSelected(slug: string): boolean {
     return this.selectedStoreSlugs().includes(slug);
   }
 
-  private loadStores() {
-    this.wooCommerceService.listStores().subscribe(stores => this.availableStores.set(stores));
+  private refreshAvailableStores(orders: Order[]) {
+    const mapBySlug = new Map<string, StoreFilterOption>();
+
+    for (const order of orders) {
+      const slug = (order.store_slug || '').trim();
+      if (!slug) continue;
+      if (!mapBySlug.has(slug)) {
+        mapBySlug.set(slug, { slug, label: slug });
+      }
+    }
+
+    this.availableStores.set(Array.from(mapBySlug.values()).sort((a, b) => a.label.localeCompare(b.label)));
   }
 
-  getStatusClass(status: OrderStatus): string {
-    switch (status) {
-      case OrderStatus.ENTREGADO: return 'bg-success';
-      case OrderStatus.ERROR: return 'bg-danger';
-      case OrderStatus.CANCELADO: return 'bg-secondary';
-      case OrderStatus.EN_CAMINO: return 'bg-info';
-      case OrderStatus.DESPACHADO: return 'bg-primary';
+  getStatusClass(status: OrderStatus | string): string {
+    switch ((status as string)?.toUpperCase()) {
+      case 'ENTREGADO': return 'bg-success';
+      case 'ERROR':
+      case 'ERROR_EN_PEDIDO': return 'bg-danger';
+      case 'CANCELADO': return 'bg-secondary';
+      case 'EN_CAMINO': return 'bg-info';
+      case 'DESPACHADO': return 'bg-primary';
+      case 'EMPAQUETADO':
+      case 'EN_PROCESO': return 'bg-warning';
       default: return 'bg-warning';
     }
+  }
+
+  /** Devuelve la etiqueta legible del estado, priorizando woo_status_label/woo_status del backend */
+  getStatusLabel(order: Order): string {
+    const effectiveWooStatus = order.woo_status || order.meta?.status;
+    const isEnProceso = (order.status as string)?.toUpperCase() === 'EN_PROCESO';
+    // Si el backend ya envía la etiqueta traducida, usarla directamente
+    if (order.woo_status_label && isEnProceso) {
+      return order.woo_status_label;
+    }
+    if (effectiveWooStatus && isEnProceso) {
+      const wooLabels: Record<string, string> = {
+        'pending':    'Pendiente de Pago',
+        'processing': 'En Proceso',
+        'on-hold':    'En Espera',
+        'completed':  'Completado',
+        'cancelled':  'Cancelado',
+        'refunded':   'Reembolsado',
+        'failed':     'Fallido'
+      };
+      return wooLabels[effectiveWooStatus] ?? effectiveWooStatus;
+    }
+    const internalLabels: Record<string, string> = {
+      'EN_PROCESO':      'En Proceso',
+      'EMPAQUETADO':     'Empaquetado',
+      'DESPACHADO':      'Despachado',
+      'EN_CAMINO':       'En Camino',
+      'ENTREGADO':       'Entregado',
+      'ERROR':           'Error',
+      'ERROR_EN_PEDIDO': 'Error en Pedido',
+      'CANCELADO':       'Cancelado'
+    };
+    return internalLabels[(order.status as string)?.toUpperCase()] ?? order.status;
+  }
+
+  /** Color del badge usando woo_status cuando aplica */
+  getStatusClassForOrder(order: Order): string {
+    const effectiveWooStatus = order.woo_status || order.meta?.status;
+    const isEnProceso = (order.status as string)?.toUpperCase() === 'EN_PROCESO';
+    if (effectiveWooStatus && isEnProceso) {
+      const wooColors: Record<string, string> = {
+        'pending':    'bg-secondary',
+        'processing': 'bg-warning',
+        'on-hold':    'bg-info text-dark',
+        'failed':     'bg-danger'
+      };
+      return wooColors[effectiveWooStatus] ?? 'bg-warning';
+    }
+    return this.getStatusClass(order.status);
   }
 
     // Formatea la fecha estimada, mostrando raw si no es un solo valor ISO
@@ -325,25 +321,29 @@ export class OrdersListComponent implements OnInit {
   previousPage() {
     if (this.currentPage() > 1) {
       this.currentPage.set(this.currentPage() - 1);
-      this.loadOrders();
+      this.applySearch(this.routeSearchService.getTermForContext('orders'));
     }
   }
 
   nextPage() {
     if (this.currentPage() < this.lastPage()) {
       this.currentPage.set(this.currentPage() + 1);
-      this.loadOrders();
+      this.applySearch(this.routeSearchService.getTermForContext('orders'));
     }
   }
 
   goToPage(page: number | string) {
     if (typeof page === 'number') {
       this.currentPage.set(page);
-      this.loadOrders();
+      this.applySearch(this.routeSearchService.getTermForContext('orders'));
     }
   }
 
   getOrderSource(order: Order): 'web' | 'redes' | 'woocommerce' | null {
+    if (order.store_slug) {
+      return 'woocommerce';
+    }
+
     // WooCommerce orders
     if (order.source === 'woocommerce') {
       return 'woocommerce';
@@ -368,6 +368,10 @@ export class OrdersListComponent implements OnInit {
   }
 
   getSourceDisplay(order: Order): string {
+    if (order.store_slug) {
+      return order.store_slug;
+    }
+
     if (order.woo_source) {
       return order.woo_source;
     }
@@ -429,7 +433,7 @@ export class OrdersListComponent implements OnInit {
   }
 
   private setLoadedOrders(orders: Order[]): void {
-    this.rawOrders.set(orders);
+    this.rawOrders.set(this.sortOrdersByCreatedAtDesc(orders));
     this.applySearch(this.routeSearchService.getTermForContext('orders'));
   }
 
@@ -438,12 +442,38 @@ export class OrdersListComponent implements OnInit {
     const sourceOrders = this.rawOrders();
 
     if (!term) {
-      this.orders.set(sourceOrders);
+      this.setPagedOrders(this.sortOrdersByCreatedAtDesc(sourceOrders));
       return;
     }
 
     const filteredOrders = sourceOrders.filter((order) => this.matchesSearch(order, term));
-    this.orders.set(filteredOrders);
+    this.setPagedOrders(this.sortOrdersByCreatedAtDesc(filteredOrders));
+  }
+
+  private setPagedOrders(orders: Order[]) {
+    const totalPages = Math.max(1, Math.ceil(orders.length / this.itemsPerPage));
+    this.lastPage.set(totalPages);
+
+    if (this.currentPage() > totalPages) {
+      this.currentPage.set(totalPages);
+    }
+
+    const start = (this.currentPage() - 1) * this.itemsPerPage;
+    const end = start + this.itemsPerPage;
+    this.orders.set(orders.slice(start, end));
+  }
+
+  private sortOrdersByCreatedAtDesc(orders: Order[]): Order[] {
+    return [...orders].sort((a, b) => {
+      const aTime = new Date(a.created_at).getTime();
+      const bTime = new Date(b.created_at).getTime();
+
+      if (aTime === bTime) {
+        return (Number(b.id) || 0) - (Number(a.id) || 0);
+      }
+
+      return bTime - aTime;
+    });
   }
 
   private matchesSearch(order: Order, term: string): boolean {
@@ -508,5 +538,54 @@ export class OrdersListComponent implements OnInit {
       String(order.id || '').toLowerCase(),
       String(order.woo_order_id || '').toLowerCase()
     ].filter(Boolean);
+  }
+
+  private applySourceAndStoreFilters() {
+    const filteredBySource = this.allOrders().filter((order) => this.matchesDataSource(order));
+    const filteredByStore = filteredBySource.filter((order) => this.matchesStoreFilter(order));
+    this.setLoadedOrders(filteredByStore);
+  }
+
+  private fetchAllInternalOrders(): Observable<Order[]> {
+    return this.orderService.getOrders(1, this.itemsPerPage).pipe(
+      switchMap((firstPage) => {
+        const allOrders = [...(firstPage.data || [])];
+        const lastPage = firstPage.last_page || 1;
+
+        if (lastPage <= 1) {
+          return of(allOrders);
+        }
+
+        const remaining = Array.from({ length: lastPage - 1 }, (_, i) =>
+          this.orderService.getOrders(i + 2, this.itemsPerPage).pipe(
+            catchError(() => of({ data: [], current_page: i + 2, last_page: lastPage, total: 0 }))
+          )
+        );
+
+        return forkJoin(remaining).pipe(
+          map((pages) => [...allOrders, ...pages.flatMap((page) => page.data || [])])
+        );
+      })
+    );
+  }
+
+  private matchesDataSource(order: Order): boolean {
+    const isWoo = this.getOrderSource(order) === 'woocommerce';
+
+    if (this.dataSource() === 'internal') {
+      return !isWoo;
+    }
+
+    if (this.dataSource() === 'woocommerce') {
+      return isWoo;
+    }
+
+    return true;
+  }
+
+  private matchesStoreFilter(order: Order): boolean {
+    const selected = this.selectedStoreSlugs();
+    if (selected.length === 0) return true;
+    return selected.includes(order.store_slug ?? '');
   }
 }
