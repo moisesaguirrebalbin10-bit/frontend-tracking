@@ -43,19 +43,19 @@ import { OrderService } from '../../../services/order.service';
               <div class="col-md-6">
                 <h6 class="text-muted">Información del Cliente</h6>
                 <p><strong>Nombre:</strong> {{ order.customer_name || order.user?.name || 'N/A' }}</p>
-                <p><strong>Email:</strong> {{ order.customer_email || 'N/A' }}</p>
-                <p><strong>Teléfono:</strong> {{ order.customer_phone || 'N/A' }}</p>
+                <p><strong>Email:</strong> {{ getCustomerEmail(order) }}</p>
+                <p><strong>Teléfono:</strong> {{ getCustomerPhone(order) }}</p>
               </div>
               <div class="col-md-6">
                 <h6 class="text-muted">Información de Entrega</h6>
-                <p><strong>Ubicación:</strong> {{ order.delivery_location || 'N/A' }}</p>
+                <p><strong>Ubicación:</strong> {{ getDeliveryLocation(order) }}</p>
                 <p><strong>Coordenadas:</strong> 
-                  <span *ngIf="order.delivery_coordinates">
-                    {{ order.delivery_coordinates.lat }}, {{ order.delivery_coordinates.lng }}
+                  <span *ngIf="getDeliveryCoordinates(order) as coords">
+                    {{ coords.lat }}, {{ coords.lng }}
                   </span>
-                  <span *ngIf="!order.delivery_coordinates">N/A</span>
+                  <span *ngIf="!getDeliveryCoordinates(order)">N/A</span>
                 </p>
-                <p><strong>Fecha Estimada de Entrega:</strong> {{ order.estimated_delivery_date ? formatEstimated(order.estimated_delivery_date) : 'N/A' }}</p>
+                <p><strong>Fecha Estimada de Entrega:</strong> {{ getEstimatedDelivery(order) }}</p>
                 <p><strong>Fecha Real de Entrega:</strong> {{ order.delivery_date ? (order.delivery_date | date: 'short') : 'N/A' }}</p>
               </div>
             </div>
@@ -76,11 +76,14 @@ import { OrderService } from '../../../services/order.service';
                     </tr>
                   </thead>
                   <tbody>
-                    <tr *ngFor="let item of order.items">
+                    <tr *ngFor="let item of getOrderItems(order)">
                       <td>{{ item.product_name }}</td>
                       <td>{{ item.quantity }}</td>
                       <td>\${{ item.price | number: '1.2-2' }}</td>
                       <td>\${{ (item.price * item.quantity) | number: '1.2-2' }}</td>
+                    </tr>
+                    <tr *ngIf="getOrderItems(order).length === 0">
+                      <td colspan="4" class="text-muted">No hay productos disponibles para este pedido.</td>
                     </tr>
                   </tbody>
                 </table>
@@ -317,6 +320,119 @@ export class OrderDetailModalComponent implements OnChanges {
       return new Intl.DateTimeFormat('es-PE', { dateStyle: 'short' }).format(d);
     }
     return date;
+  }
+
+  getCustomerEmail(order: Order): string {
+    return order.customer_email || (order.meta as any)?.billing?.email || 'N/A';
+  }
+
+  getCustomerPhone(order: Order): string {
+    return order.customer_phone || (order.meta as any)?.billing?.phone || 'N/A';
+  }
+
+  getDeliveryLocation(order: Order): string {
+    if (order.delivery_location && order.delivery_location.trim()) {
+      return order.delivery_location;
+    }
+
+    const meta = order.meta as any;
+    if (meta && !Array.isArray(meta)) {
+      const mapAddress = this.findMetaValue(meta.meta_data, '_billing_direccion_mapa');
+      if (mapAddress) return mapAddress;
+
+      const shippingAddress = `${meta.shipping?.address_1 || ''} ${meta.shipping?.city || ''}`.trim();
+      if (shippingAddress) return shippingAddress;
+
+      const billingAddress = `${meta.billing?.address_1 || ''} ${meta.billing?.city || ''}`.trim();
+      if (billingAddress) return billingAddress;
+    }
+
+    return 'N/A';
+  }
+
+  getDeliveryCoordinates(order: Order): { lat: number; lng: number } | null {
+    if (order.delivery_coordinates) {
+      return order.delivery_coordinates;
+    }
+
+    const meta = order.meta as any;
+    if (meta && !Array.isArray(meta)) {
+      const latRaw = this.findMetaValue(meta.meta_data, '_billing_cordenada_latitud') || this.findMetaValue(meta.meta_data, '_shipping_latitude');
+      const lngRaw = this.findMetaValue(meta.meta_data, '_billing_cordenada_longitud') || this.findMetaValue(meta.meta_data, '_shipping_longitude');
+      const lat = Number(latRaw);
+      const lng = Number(lngRaw);
+      if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+        return { lat, lng };
+      }
+    }
+
+    return null;
+  }
+
+  getEstimatedDelivery(order: Order): string {
+    if (order.estimated_delivery_date) {
+      return this.formatEstimated(order.estimated_delivery_date);
+    }
+
+    const meta = order.meta as any;
+    if (meta && !Array.isArray(meta)) {
+      const direct =
+        this.findMetaValue(meta.meta_data, '_delivery_date') ||
+        this.findMetaValue(meta.meta_data, 'delivery_date') ||
+        this.findMetaValue(meta.meta_data, 'estimated_delivery_date') ||
+        this.findMetaValue(meta.meta_data, '_estimated_delivery_date') ||
+        this.findMetaValue(meta.meta_data, '_billing_fecha_entrega');
+
+      if (direct) {
+        return this.formatEstimated(String(direct));
+      }
+
+      const f1 = this.findMetaValue(meta.meta_data, '_billing_fecha_entrega_1');
+      const f2 = this.findMetaValue(meta.meta_data, '_billing_fecha_entrega_2');
+      if (f1 && f2) return `${f1} y ${f2}`;
+      if (f1) return String(f1);
+    }
+
+    return 'N/A';
+  }
+
+  getOrderItems(order: Order): Array<{ product_name: string; quantity: number; price: number }> {
+    if (Array.isArray(order.items) && order.items.length > 0) {
+      return order.items.map((item) => ({
+        product_name: item.product_name,
+        quantity: Number(item.quantity) || 0,
+        price: Number(item.price) || 0
+      }));
+    }
+
+    const meta = order.meta as any;
+    const lineItems = meta?.line_items;
+    if (Array.isArray(lineItems)) {
+      return lineItems.map((item: any) => {
+        const quantity = Number(item?.quantity) || 0;
+        const total = Number(item?.total);
+        const unitFromPrice = Number(item?.price);
+        const unitPrice = !Number.isNaN(unitFromPrice)
+          ? unitFromPrice
+          : (quantity > 0 && !Number.isNaN(total) ? total / quantity : 0);
+
+        return {
+          product_name: item?.name || item?.parent_name || 'Producto',
+          quantity,
+          price: Number.isNaN(unitPrice) ? 0 : unitPrice
+        };
+      });
+    }
+
+    return [];
+  }
+
+  private findMetaValue(metaData: any, key: string): string | null {
+    if (!Array.isArray(metaData)) {
+      return null;
+    }
+    const entry = metaData.find((m: any) => m?.key === key);
+    return entry?.value != null ? String(entry.value) : null;
   }
 
 

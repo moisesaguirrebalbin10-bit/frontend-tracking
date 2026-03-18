@@ -82,10 +82,10 @@ interface StoreFilterOption {
                       <td>{{ order.external_id }}</td>
                       <td>{{ order.customer_name }}</td>
                       <td>{{ order.created_at | date: 'short' }}</td>
-                      <td>{{ order.estimated_delivery_date ? formatEstimated(order.estimated_delivery_date) : '-' }}</td>
+                      <td>{{ getEstimatedDeliveryDisplay(order) }}</td>
                       <td>{{ order.status === 'ENTREGADO' && order.delivery_date ? (order.delivery_date | date:'short') : '-' }}</td>
                       <td>
-                        <small>{{ order.delivery_location || '-' }}</small>
+                        <small>{{ getDeliveryLocationDisplay(order) }}</small>
                       </td>
                       <td>$ {{ order.total }}</td>
                       <td>
@@ -305,18 +305,75 @@ export class OrdersListComponent implements OnInit {
     return this.getStatusClass(order.status);
   }
 
-    // Formatea la fecha estimada, mostrando raw si no es un solo valor ISO
-    formatEstimated(date: string): string {
-      if (!date) return '-';
-      // rango detectado
-      if (date.includes(' y ')) return date;
-      // tratar de parsear
-      const d = new Date(date);
-      if (!isNaN(d.getTime())) {
-        return new Intl.DateTimeFormat('es-PE', { dateStyle: 'short' }).format(d);
-      }
-      return date;
+  // Formatea la fecha estimada, mostrando raw si no es un solo valor ISO
+  formatEstimated(date: string): string {
+    if (!date) return '-';
+    // rango detectado
+    if (date.includes(' y ')) return date;
+    // tratar de parsear
+    const d = new Date(date);
+    if (!isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat('es-PE', { dateStyle: 'short' }).format(d);
     }
+    return date;
+  }
+
+  getEstimatedDeliveryDisplay(order: Order): string {
+    const defaultEstimatedText = 'Pedido para Provincia 2-3 dias aprox';
+    const topLevelEstimated = order.estimated_delivery_date;
+    if (topLevelEstimated) {
+      return this.formatEstimated(topLevelEstimated);
+    }
+
+    const meta = order.meta as any;
+    if (meta && !Array.isArray(meta)) {
+      const direct =
+        this.findMetaValue(meta.meta_data, '_delivery_date') ||
+        this.findMetaValue(meta.meta_data, 'delivery_date') ||
+        this.findMetaValue(meta.meta_data, 'estimated_delivery_date') ||
+        this.findMetaValue(meta.meta_data, '_estimated_delivery_date') ||
+        this.findMetaValue(meta.meta_data, '_billing_fecha_entrega');
+
+      if (direct) {
+        return this.formatEstimated(String(direct));
+      }
+
+      const f1 = this.findMetaValue(meta.meta_data, '_billing_fecha_entrega_1');
+      const f2 = this.findMetaValue(meta.meta_data, '_billing_fecha_entrega_2');
+      if (f1 && f2) return `${f1} y ${f2}`;
+      if (f1) return String(f1);
+    }
+
+    return defaultEstimatedText;
+  }
+
+  getDeliveryLocationDisplay(order: Order): string {
+    if (order.delivery_location && order.delivery_location.trim()) {
+      return order.delivery_location;
+    }
+
+    const meta = order.meta as any;
+    if (meta && !Array.isArray(meta)) {
+      const mapAddress = this.findMetaValue(meta.meta_data, '_billing_direccion_mapa');
+      if (mapAddress) return mapAddress;
+
+      const shippingAddress = `${meta.shipping?.address_1 || ''} ${meta.shipping?.city || ''}`.trim();
+      if (shippingAddress) return shippingAddress;
+
+      const billingAddress = `${meta.billing?.address_1 || ''} ${meta.billing?.city || ''}`.trim();
+      if (billingAddress) return billingAddress;
+    }
+
+    return '-';
+  }
+
+  private findMetaValue(metaData: any, key: string): string | null {
+    if (!Array.isArray(metaData)) {
+      return null;
+    }
+    const entry = metaData.find((m: any) => m?.key === key);
+    return entry?.value != null ? String(entry.value) : null;
+  }
 
   previousPage() {
     if (this.currentPage() > 1) {

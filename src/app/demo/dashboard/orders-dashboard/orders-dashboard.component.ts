@@ -90,7 +90,7 @@ interface StoreFilterOption {
       </div>
 
       <div class="row mb-4 g-3">
-        <div class="col-md-3">
+        <div class="col-lg col-md-6">
           <div class="card metric-card h-100">
             <div class="card-body">
               <h6 class="text-muted">Total Pedidos</h6>
@@ -98,7 +98,7 @@ interface StoreFilterOption {
             </div>
           </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-lg col-md-6">
           <div class="card metric-card h-100">
             <div class="card-body">
               <h6 class="text-muted">Entregados</h6>
@@ -106,7 +106,7 @@ interface StoreFilterOption {
             </div>
           </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-lg col-md-6">
           <div class="card metric-card h-100">
             <div class="card-body">
               <h6 class="text-muted">En Proceso</h6>
@@ -114,11 +114,19 @@ interface StoreFilterOption {
             </div>
           </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-lg col-md-6">
           <div class="card metric-card h-100">
             <div class="card-body">
               <h6 class="text-muted">Errores</h6>
               <h3 class="text-danger">{{ errorOrders() }}</h3>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg col-md-6">
+          <div class="card metric-card h-100">
+            <div class="card-body">
+              <h6 class="text-muted">Cancelados</h6>
+              <h3 class="text-secondary">{{ cancelledOrders() }}</h3>
             </div>
           </div>
         </div>
@@ -160,9 +168,9 @@ interface StoreFilterOption {
                       <td>{{ order.external_id }}</td>
                       <td>{{ order.customer_name }}</td>
                       <td>{{ order.created_at | date: 'short' }}</td>
-                      <td>{{ order.estimated_delivery_date ? formatEstimated(order.estimated_delivery_date) : '-' }}</td>
+                      <td>{{ getEstimatedDeliveryDisplay(order) }}</td>
                       <td>{{ order.status === 'ENTREGADO' && order.delivery_date ? (order.delivery_date | date: 'short') : '-' }}</td>
-                      <td><small>{{ order.delivery_location || '-' }}</small></td>
+                      <td><small>{{ getDeliveryLocationDisplay(order) }}</small></td>
                       <td>$ {{ order.total }}</td>
                       <td>
                         <span class="badge" [ngClass]="getStatusClassForOrder(order)">
@@ -242,6 +250,7 @@ export class OrdersDashboardComponent implements OnInit {
   deliveredOrders = signal(0);
   inProgressOrders = signal(0);
   errorOrders = signal(0);
+  cancelledOrders = signal(0);
 
   currentPage = signal(1);
   readonly pageSize = 100;
@@ -442,11 +451,16 @@ export class OrdersDashboardComponent implements OnInit {
     this.apiTotal.set(filtered.length);
     this.apiLastPage.set(Math.max(1, Math.ceil(filtered.length / this.pageSize)));
     this.totalOrders.set(filtered.length);
-    this.deliveredOrders.set(filtered.filter((order) => order.status === OrderStatus.ENTREGADO).length);
+    this.deliveredOrders.set(filtered.filter((order) => this.normalizeStatus(order.status) === 'ENTREGADO').length);
     this.inProgressOrders.set(
-      filtered.filter((order) => [OrderStatus.EN_PROCESO, OrderStatus.EMPAQUETADO, OrderStatus.DESPACHADO, OrderStatus.EN_CAMINO].includes(order.status)).length
+      filtered.filter((order) => ['EN_PROCESO', 'EMPAQUETADO', 'DESPACHADO', 'EN_CAMINO'].includes(this.normalizeStatus(order.status))).length
     );
-    this.errorOrders.set(filtered.filter((order) => order.status === OrderStatus.ERROR).length);
+    this.errorOrders.set(filtered.filter((order) => ['ERROR', 'ERROR_EN_PEDIDO'].includes(this.normalizeStatus(order.status))).length);
+    this.cancelledOrders.set(filtered.filter((order) => this.normalizeStatus(order.status) === 'CANCELADO').length);
+  }
+
+  private normalizeStatus(status: OrderStatus | string | null | undefined): string {
+    return String(status || '').trim().toUpperCase();
   }
 
   private matchesSearch(order: Order, term: string): boolean {
@@ -599,6 +613,54 @@ export class OrdersDashboardComponent implements OnInit {
     }
 
     return date;
+  }
+
+  getEstimatedDeliveryDisplay(order: Order): string {
+    const defaultEstimatedText = 'Pedido para Provincia 2-3 dias aprox';
+    const topLevelEstimated = order.estimated_delivery_date;
+    if (topLevelEstimated) {
+      return this.formatEstimated(topLevelEstimated);
+    }
+
+    const meta = order.meta as any;
+    if (meta && !Array.isArray(meta)) {
+      const metaData = Array.isArray(meta.meta_data) ? meta.meta_data : [];
+      const deliveryMeta = metaData.find((m: any) =>
+        m?.key === '_delivery_date' ||
+        m?.key === 'delivery_date' ||
+        m?.key === 'estimated_delivery_date' ||
+        m?.key === '_estimated_delivery_date' ||
+        m?.key === '_billing_fecha_entrega'
+      )?.value;
+
+      if (deliveryMeta) {
+        return this.formatEstimated(String(deliveryMeta));
+      }
+
+      const f1 = metaData.find((m: any) => m?.key === '_billing_fecha_entrega_1')?.value;
+      const f2 = metaData.find((m: any) => m?.key === '_billing_fecha_entrega_2')?.value;
+      if (f1 && f2) return `${f1} y ${f2}`;
+      if (f1) return String(f1);
+    }
+
+    return defaultEstimatedText;
+  }
+
+  getDeliveryLocationDisplay(order: Order): string {
+    if (order.delivery_location && order.delivery_location.trim()) {
+      return order.delivery_location;
+    }
+
+    const meta = order.meta as any;
+    if (meta && !Array.isArray(meta)) {
+      const shippingAddress = `${meta.shipping?.address_1 || ''} ${meta.shipping?.city || ''}`.trim();
+      if (shippingAddress) return shippingAddress;
+
+      const billingAddress = `${meta.billing?.address_1 || ''} ${meta.billing?.city || ''}`.trim();
+      if (billingAddress) return billingAddress;
+    }
+
+    return '-';
   }
 
   getStatusClass(status: OrderStatus | string): string {
