@@ -39,6 +39,11 @@ const routes: Routes = [
         path: 'admin/users',
         canActivate: [AdminGuard],
         loadComponent: () => import('./demo/pages/users/users-admin.component').then((c) => c.UsersAdminComponent)
+      },
+      {
+        path: 'admin/tracking-analytics',
+        canActivate: [AdminGuard],
+        loadComponent: () => import('./demo/dashboard/tracking-analytics/tracking-analytics.component').then((c) => c.TrackingAnalyticsComponent)
       }
     ]
   },

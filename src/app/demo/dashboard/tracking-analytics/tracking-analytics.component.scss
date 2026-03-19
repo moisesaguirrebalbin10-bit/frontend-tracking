@@ -1,0 +1,111 @@
+:host {
+  display: block;
+}
+
+.tracking-analytics {
+  --surface: #101826;
+  --surface-soft: #0f172a;
+  --surface-border: rgba(148, 163, 184, 0.18);
+  --muted: #94a3b8;
+  --text: #e5eef8;
+  --gain: #22c55e;
+  --loss: #ef4444;
+}
+
+.hero-card,
+.control-card,
+.metric-card,
+.chart-card,
+.table-card {
+  background:
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.10), transparent 26%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+  border: 1px solid var(--surface-border);
+  box-shadow: 0 18px 45px rgba(2, 6, 23, 0.22);
+}
+
+.hero-row,
+.control-row,
+.store-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.range-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.date-field {
+  min-width: 190px;
+}
+
+.date-field label,
+.filter-label,
+.eyebrow,
+.metric-label,
+.table-counter {
+  color: var(--muted);
+}
+
+.eyebrow {
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hero-copy {
+  max-width: 760px;
+  color: #c6d2e3;
+}
+
+.export-btn {
+  white-space: nowrap;
+}
+
+.metric-card .card-body {
+  min-height: 112px;
+}
+
+.accent-gain h3 {
+  color: var(--gain);
+}
+
+.accent-loss h3 {
+  color: var(--loss);
+}
+
+.split-metric {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.chart-card .card-body {
+  min-height: 360px;
+}
+
+.analytics-table td,
+.analytics-table th {
+  vertical-align: middle;
+}
+
+@media (max-width: 768px) {
+  .hero-row,
+  .control-row,
+  .store-row,
+  .range-row,
+  .split-metric {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .date-field {
+    min-width: 100%;
+  }
+}

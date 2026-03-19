@@ -71,6 +71,15 @@ export const NavigationItems: NavigationItem[] = [
         url: '/admin/users',
         icon: 'team',
         breadcrumbs: false
+      },
+      {
+        id: 'admin-tracking-analytics',
+        title: 'Analitica Tracking',
+        type: 'item',
+        classes: 'nav-item',
+        url: '/admin/tracking-analytics',
+        icon: 'bar-chart',
+        breadcrumbs: false
       }
     ]
   },
