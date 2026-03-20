@@ -1,10 +1,101 @@
-<div class="row">
-  <div class="col-sm-12">
-    <app-card cardTitle="Hello">
-      <p>
-        Lorem ipsum dolor sit amet consectetur adipisicing elit. Voluptate dignissimos nemo animi quisquam, fugit repellat velit? Doloremque
-        maxime eveniet autem repellendus officia est! Ex dolore, quae reprehenderit enim vel reiciendis?
+<div class="public-tracking container py-4">
+  <section class="hero card mb-4">
+    <div class="card-body">
+      <h1 class="hero-title mb-2">Consulta tu Pedido - Ezzeta Company</h1>
+      <p class="hero-copy mb-4">
+        Ingresa tu Boleta Bsale y tu DNI para revisar el estado de tu pedido de forma rapida y segura.
       </p>
-    </app-card>
-  </div>
+
+      <form class="row g-3" (ngSubmit)="onSubmit()">
+        <div class="col-md-6">
+          <label class="form-label">Boleta Bsale</label>
+          <input
+            class="form-control"
+            type="text"
+            name="bsale"
+            placeholder="Ejemplo: B001-9999"
+            [(ngModel)]="bsaleInput"
+          />
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">DNI</label>
+          <input
+            class="form-control"
+            type="text"
+            name="dni"
+            placeholder="Ejemplo: 12345678"
+            [(ngModel)]="dniInput"
+          />
+        </div>
+        <div class="col-12">
+          <button class="btn btn-primary px-4" type="submit" [disabled]="loading">Consultar</button>
+        </div>
+      </form>
+
+      <div *ngIf="loading" class="mt-3 text-muted">
+        Consultando pedido...
+      </div>
+      <div *ngIf="!loading && errorMessage" class="alert alert-warning mt-3 mb-0">
+        {{ errorMessage }}
+      </div>
+    </div>
+  </section>
+
+  <section class="card" *ngIf="foundOrder as order">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <h5 class="mb-0">Detalle del Pedido</h5>
+    </div>
+    <div class="card-body">
+      <div class="mb-4">
+        <h6 class="text-muted mb-3">Estado del Pedido</h6>
+        <app-order-tracking [currentStatus]="getTimelineStatus(order)" [canEdit]="false"></app-order-tracking>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-6">
+          <h6 class="text-muted">Informacion del Cliente</h6>
+          <p><strong>Nombre:</strong> {{ order.customer_name || 'N/A' }}</p>
+          <p><strong>DNI:</strong> {{ getCustomerDocument(order) }}</p>
+          <p><strong>Email:</strong> {{ order.customer_email || 'N/A' }}</p>
+          <p><strong>Telefono:</strong> {{ order.customer_phone || 'N/A' }}</p>
+        </div>
+        <div class="col-md-6">
+          <h6 class="text-muted">Informacion de Entrega</h6>
+          <p><strong>Ubicacion:</strong> {{ getDeliveryLocation(order) }}</p>
+          <p><strong>Fecha Estimada:</strong> {{ getEstimatedDelivery(order) }}</p>
+        </div>
+      </div>
+
+      <h6 class="text-muted">Productos</h6>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Cantidad</th>
+              <th>Precio Unitario</th>
+              <th>Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of getOrderItems(order)">
+              <td>{{ item.name }}</td>
+              <td>{{ item.quantity }}</td>
+              <td>S/ {{ item.price | number: '1.2-2' }}</td>
+              <td>S/ {{ (item.price * item.quantity) | number: '1.2-2' }}</td>
+            </tr>
+            <tr *ngIf="getOrderItems(order).length === 0">
+              <td colspan="4" class="text-muted">No hay productos registrados para este pedido.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="summary mt-4">
+        <div>
+          <strong>Total:</strong> S/ {{ order.total | number: '1.2-2' }}
+        </div>
+      </div>
+    </div>
+  </section>
 </div>

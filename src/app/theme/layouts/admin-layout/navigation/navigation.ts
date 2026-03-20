@@ -91,11 +91,12 @@ export const NavigationItems: NavigationItem[] = [
     children: [
       {
         id: 'sample-page',
-        title: 'Sample Page',
+        title: 'Consultar Pedido',
         type: 'item',
-        url: '/sample-page',
+        url: '/consultar-pedido',
         classes: 'nav-item',
-        icon: 'chrome'
+        icon: 'search',
+        target: true
       },
       {
         id: 'document',

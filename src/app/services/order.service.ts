@@ -98,6 +98,13 @@ export class OrderService {
     return this.http.post(`${this.apiUrl}/orders/sync`, {});
   }
 
+  lookupPublicOrder(boleta: string, dni: string): Observable<any> {
+    return this.http.post<any>(`${this.apiUrl}/orders/public/lookup`, {
+      boleta,
+      dni
+    });
+  }
+
   /**
    * Get WooCommerce orders
    */

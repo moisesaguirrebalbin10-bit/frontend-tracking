@@ -151,7 +151,8 @@ interface StoreFilterOption {
                 <table class="table table-striped table-hover align-middle mb-0">
                   <thead>
                     <tr>
-                      <th>Nro Boleta</th>
+                      <th>Boleta Bsale</th>
+                      <th>ID Woo</th>
                       <th>Nombre</th>
                       <th>Fecha</th>
                       <th>Fecha de Entrega</th>
@@ -165,6 +166,7 @@ interface StoreFilterOption {
                   </thead>
                   <tbody>
                     <tr *ngFor="let order of pagedOrders">
+                      <td>{{ getBsaleSerieDisplay(order) }}</td>
                       <td>{{ order.external_id }}</td>
                       <td>{{ order.customer_name }}</td>
                       <td>{{ order.created_at | date: 'short' }}</td>
@@ -187,7 +189,7 @@ interface StoreFilterOption {
                       </td>
                     </tr>
                     <tr *ngIf="!filteredOrders().length">
-                      <td colspan="10" class="text-center text-muted py-4">No hay pedidos para el filtro seleccionado.</td>
+                      <td colspan="11" class="text-center text-muted py-4">No hay pedidos para el filtro seleccionado.</td>
                     </tr>
                   </tbody>
                 </table>
@@ -470,6 +472,7 @@ export class OrdersDashboardComponent implements OnInit {
 
     const normalizedTerm = this.normalizeDateTerm(term);
     const ticket = String(order.external_id || '').toLowerCase();
+    const bsaleSerie = this.getBsaleSerieDisplay(order).toLowerCase();
     const customerName = String(order.customer_name || '').toLowerCase();
     const createdAtIso = String(order.created_at || '').toLowerCase();
 
@@ -486,6 +489,7 @@ export class OrdersDashboardComponent implements OnInit {
 
     return (
       ticket.includes(term) ||
+      bsaleSerie.includes(term) ||
       customerName.includes(term) ||
       createdAtIso.includes(term) ||
       createdAtShort.includes(term) ||
@@ -772,6 +776,25 @@ export class OrdersDashboardComponent implements OnInit {
       default:
         return order.user?.name || 'Desconocido';
     }
+  }
+
+  getBsaleSerieDisplay(order: Order): string {
+    const bsale = order.bsale || (order.meta as any)?.bsale;
+    const serie = String(bsale?.serie || '').trim();
+    const numero = String(bsale?.numero || '').trim();
+
+    if (serie) {
+      if (numero && !serie.includes(numero)) {
+        return `${serie}-${numero}`;
+      }
+      return serie;
+    }
+
+    if (numero) {
+      return numero;
+    }
+
+    return '-';
   }
 
   getSourceBadgeClass(order: Order): string {

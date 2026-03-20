@@ -36,6 +36,11 @@ export interface Order {
   woo_status_label?: string; // Etiqueta legible enviada por el backend (ej: "Pendiente de Pago")
   woo_order_number?: string;
   woo_order_id?: number;
+  bsale?: {
+    boleta_id?: number;
+    numero?: string;
+    serie?: string;
+  };
 
   // Frontend helper fields for Woo/internal reconciliation.
   internal_order_id?: number;

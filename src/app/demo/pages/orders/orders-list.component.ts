@@ -65,7 +65,8 @@ interface StoreFilterOption {
                 <table class="table table-striped table-hover">
                   <thead>
                     <tr>
-                      <th>Nro Boleta</th>
+                      <th>Boleta Bsale</th>
+                      <th>ID Woo</th>
                       <th>Nombre</th>
                       <th>Fecha</th>
                       <th>Fecha de Entrega</th>
@@ -79,6 +80,7 @@ interface StoreFilterOption {
                   </thead>
                   <tbody>
                     <tr *ngFor="let order of orders()">
+                      <td>{{ getBsaleSerieDisplay(order) }}</td>
                       <td>{{ order.external_id }}</td>
                       <td>{{ order.customer_name }}</td>
                       <td>{{ order.created_at | date: 'short' }}</td>
@@ -440,7 +442,24 @@ export class OrdersListComponent implements OnInit {
       default: return order.user?.name || 'Desconocido';
     }
   }
+  getBsaleSerieDisplay(order: Order): string {
+    const bsale = order.bsale || (order.meta as any)?.bsale;
+    const serie = String(bsale?.serie || '').trim();
+    const numero = String(bsale?.numero || '').trim();
 
+    if (serie) {
+      if (numero && !serie.includes(numero)) {
+        return `${serie}-${numero}`;
+      }
+      return serie;
+    }
+
+    if (numero) {
+      return numero;
+    }
+
+    return '-';
+  }
   getSourceBadgeClass(order: Order): string {
     if (order.source === 'woocommerce' || (order.woo_source && !order.user)) {
       return 'bg-warning';
@@ -536,6 +555,7 @@ export class OrdersListComponent implements OnInit {
   private matchesSearch(order: Order, term: string): boolean {
     const normalizedTerm = this.normalizeDateTerm(term);
     const ticket = String(order.external_id || '').toLowerCase();
+    const bsaleSerie = this.getBsaleSerieDisplay(order).toLowerCase();
     const customerName = String(order.customer_name || '').toLowerCase();
     const createdAtIso = String(order.created_at || '').toLowerCase();
 
@@ -552,6 +572,7 @@ export class OrdersListComponent implements OnInit {
 
     return (
       ticket.includes(term) ||
+      bsaleSerie.includes(term) ||
       customerName.includes(term) ||
       createdAtIso.includes(term) ||
       createdAtShort.includes(term) ||

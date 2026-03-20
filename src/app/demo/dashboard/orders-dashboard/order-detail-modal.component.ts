@@ -43,6 +43,7 @@ import { OrderService } from '../../../services/order.service';
               <div class="col-md-6">
                 <h6 class="text-muted">Información del Cliente</h6>
                 <p><strong>Nombre:</strong> {{ order.customer_name || order.user?.name || 'N/A' }}</p>
+                <p><strong>DNI:</strong> {{ getCustomerDocument(order) }}</p>
                 <p><strong>Email:</strong> {{ getCustomerEmail(order) }}</p>
                 <p><strong>Teléfono:</strong> {{ getCustomerPhone(order) }}</p>
               </div>
@@ -328,6 +329,25 @@ export class OrderDetailModalComponent implements OnChanges {
 
   getCustomerPhone(order: Order): string {
     return order.customer_phone || (order.meta as any)?.billing?.phone || 'N/A';
+  }
+
+  getCustomerDocument(order: Order): string {
+    const meta = order.meta as any;
+    if (meta && !Array.isArray(meta)) {
+      const direct =
+        this.findMetaValue(meta.meta_data, 'dni_ce') ||
+        this.findMetaValue(meta.meta_data, '_billing_dni_ce') ||
+        this.findMetaValue(meta.meta_data, 'billing_documento') ||
+        this.findMetaValue(meta.meta_data, '_billing_documento') ||
+        this.findMetaValue(meta.meta_data, 'document_number') ||
+        this.findMetaValue(meta.meta_data, 'dni');
+
+      if (direct) {
+        return direct;
+      }
+    }
+
+    return 'N/A';
   }
 
   getDeliveryLocation(order: Order): string {

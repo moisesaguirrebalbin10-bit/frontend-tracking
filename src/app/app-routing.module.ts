@@ -15,6 +15,10 @@ const routes: Routes = [
     pathMatch: 'full'
   },
   {
+    path: 'consultar-pedido',
+    loadComponent: () => import('./demo/others/sample-page/sample-page.component').then((c) => c.SamplePageComponent)
+  },
+  {
     path: '',
     component: AdminLayout,
     canActivate: [AuthGuard],
