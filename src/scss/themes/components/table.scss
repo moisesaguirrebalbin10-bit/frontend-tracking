@@ -26,14 +26,14 @@
     }
   }
   thead th {
-    background-color: $gray-100;
-    border-top: 1px solid $gray-300;
-    border-bottom: 2px solid $gray-300;
+    background-color: var(--pc-table-head-bg, #{$gray-100});
+    border-top: 1px solid var(--pc-table-head-border, #{$gray-300});
+    border-bottom: 2px solid var(--pc-table-head-border, #{$gray-300});
     font-size: 12px;
   }
 }
 
 .table-hover tbody tr:hover {
   // background-color: transparentize($primary, 0.97);
-  background-color: $gray-200;
+  background-color: var(--pc-table-hover-bg, #{$gray-200});
 }

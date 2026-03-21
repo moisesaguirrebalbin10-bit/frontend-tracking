@@ -36,3 +36,126 @@ File: style.css
 @import 'scss/themes/layouts/footer/footer.scss';
 
 @import 'scss/themes/preset-style.scss';
+
+body.dark-mode {
+	--bs-body-bg: #121212;
+	--bs-body-color: #d1d5db;
+	--bs-border-color: #2b2b2b;
+	--pc-heading-color: #f3f4f6;
+	--pc-active-background: #1f2937;
+	--pc-table-head-bg: #222222;
+	--pc-table-head-border: #2e2e2e;
+	--pc-table-hover-bg: #202730;
+	--pc-sidebar-background: #141414;
+	--pc-sidebar-color: #d1d5db;
+	--pc-sidebar-color-rgb: 209, 213, 219;
+	--pc-sidebar-caption-color: #9ca3af;
+	--pc-header-background: #141414;
+	--pc-header-color: #e5e7eb;
+	--pc-header-shadow: 0 1px 0 0 #252525;
+	--pc-card-box-shadow: inset 0 0 0 1px #262626;
+	color: #d1d5db;
+	background: #121212;
+}
+
+body.dark-mode .pc-header {
+	border-bottom-color: #252525;
+}
+
+body.dark-mode .pc-sidebar {
+	border-right: 1px solid #252525;
+}
+
+body.dark-mode .pc-container,
+body.dark-mode .coded-content,
+body.dark-mode .main-body,
+body.dark-mode .page-wrapper {
+	background: #121212;
+}
+
+body.dark-mode .card,
+body.dark-mode .dropdown-menu,
+body.dark-mode .table,
+body.dark-mode .modal-content,
+body.dark-mode .offcanvas,
+body.dark-mode .list-group-item,
+body.dark-mode .input-group-text,
+body.dark-mode .form-control,
+body.dark-mode .form-select,
+body.dark-mode .pc-footer {
+	background-color: #1a1a1a;
+	color: #e5e7eb;
+	border-color: #2b2b2b;
+}
+
+body.dark-mode .table,
+body.dark-mode .table > :not(caption) > * > * {
+	--bs-table-bg: #1a1a1a;
+	--bs-table-color: #e5e7eb;
+	--bs-table-striped-bg: #202020;
+	--bs-table-striped-color: #e5e7eb;
+	--bs-table-hover-bg: #242424;
+	--bs-table-hover-color: #f3f4f6;
+	--bs-table-border-color: #2b2b2b;
+}
+
+body.light-mode {
+	--bs-body-bg: #f5f7fb;
+	--bs-body-color: #1f2937;
+	--bs-border-color: #e5e7eb;
+	--pc-heading-color: #111827;
+	--pc-active-background: #e5e7eb;
+	--pc-table-head-bg: #f3f4f6;
+	--pc-table-head-border: #e5e7eb;
+	--pc-table-hover-bg: #f8fafc;
+	--pc-sidebar-background: #ffffff;
+	--pc-sidebar-color: #1f2937;
+	--pc-sidebar-color-rgb: 31, 41, 55;
+	--pc-sidebar-caption-color: #4b5563;
+	--pc-header-background: #ffffff;
+	--pc-header-color: #1f2937;
+	--pc-header-shadow: 0 1px 0 0 #e5e7eb;
+	--pc-card-box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+	color: #1f2937;
+	background: #f5f7fb;
+}
+
+body.light-mode .pc-header {
+	border-bottom-color: #e5e7eb;
+}
+
+body.light-mode .pc-sidebar {
+	border-right: 1px solid #e5e7eb;
+}
+
+body.light-mode .pc-container,
+body.light-mode .coded-content,
+body.light-mode .main-body,
+body.light-mode .page-wrapper {
+	background: #f5f7fb;
+}
+
+body.light-mode .card,
+body.light-mode .dropdown-menu,
+body.light-mode .table,
+body.light-mode .modal-content,
+body.light-mode .offcanvas,
+body.light-mode .list-group-item,
+body.light-mode .input-group-text,
+body.light-mode .form-control,
+body.light-mode .form-select,
+body.light-mode .pc-footer {
+	background-color: #ffffff;
+	color: #1f2937;
+}
+
+body.light-mode .table,
+body.light-mode .table > :not(caption) > * > * {
+	--bs-table-bg: #ffffff;
+	--bs-table-color: #1f2937;
+	--bs-table-striped-bg: #f8fafc;
+	--bs-table-striped-color: #1f2937;
+	--bs-table-hover-bg: #eef2f7;
+	--bs-table-hover-color: #111827;
+	--bs-table-border-color: #e5e7eb;
+}

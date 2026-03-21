@@ -8,6 +8,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { SharedModule } from 'src/app/theme/shared/shared.module';
 import { AuthService } from 'src/app/services/auth.service';
 import { UserRole } from 'src/app/models/user.model';
+import { ThemeModeService } from 'src/app/theme/shared/service/theme-mode.service';
 
 // third party
 
@@ -43,6 +44,7 @@ export class NavRightComponent {
   private iconService = inject(IconService);
   private authService = inject(AuthService);
   private router = inject(Router);
+  private themeModeService = inject(ThemeModeService);
 
   // public props
   styleSelectorToggle = input<boolean>();
@@ -132,6 +134,14 @@ export class NavRightComponent {
     if (action === 'Logout') {
       this.onLogout();
     }
+  }
+
+  get isDarkMode(): boolean {
+    return this.themeModeService.isDarkMode();
+  }
+
+  toggleThemeMode(): void {
+    this.themeModeService.toggleMode();
   }
 
   onLogout(): void {

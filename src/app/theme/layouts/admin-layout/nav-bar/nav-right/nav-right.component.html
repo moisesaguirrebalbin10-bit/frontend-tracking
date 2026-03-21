@@ -11,8 +11,28 @@
 }
 
 <ul class="list-unstyled">
+  <li class="pc-h-item theme-switch-item">
+    <button
+      type="button"
+      class="theme-switch"
+      [class.is-light]="!isDarkMode"
+      [attr.aria-label]="isDarkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'"
+      [attr.aria-pressed]="!isDarkMode"
+      (click)="toggleThemeMode()"
+    >
+      <span class="theme-thumb" aria-hidden="true">
+        <svg class="thumb-icon thumb-icon-moon" viewBox="0 0 24 24" focusable="false">
+          <path d="M20.16 14.37A8.5 8.5 0 0 1 9.63 3.84a9 9 0 1 0 10.53 10.53Z"></path>
+        </svg>
+        <svg class="thumb-icon thumb-icon-sun" viewBox="0 0 24 24" focusable="false">
+          <circle cx="12" cy="12" r="4.25"></circle>
+          <path d="M12 2.75v2.5M12 18.75v2.5M21.25 12h-2.5M5.25 12h-2.5M18.54 5.46l-1.77 1.77M7.23 16.77l-1.77 1.77M18.54 18.54l-1.77-1.77M7.23 7.23L5.46 5.46"></path>
+        </svg>
+      </span>
+    </button>
+  </li>
   <li class="dropdown pc-h-item" ngbDropdown>
-    <a href="javascript:" class="pc-head-link dropdown-toggle arrow-none me-0 bg-gray-200" data-bs-toggle="dropdown" ngbDropdownToggle>
+    <a href="javascript:" class="pc-head-link dropdown-toggle arrow-none me-0 notification-trigger" data-bs-toggle="dropdown" ngbDropdownToggle>
       <i antIcon type="bell" theme="outline"></i>
     </a>
     <div class="dropdown-menu dropdown-notification dropdown-menu-end pc-h-dropdown" ngbDropdownMenu>
