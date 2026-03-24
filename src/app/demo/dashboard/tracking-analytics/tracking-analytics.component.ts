@@ -26,7 +26,7 @@ interface AnalyticsRow {
 }
 
 type Timeframe = 'day' | 'week' | 'month' | 'range';
-type DataSource = 'all' | 'internal' | 'woocommerce';
+type DataSource = 'all' | 'internal' | 'woocommerce' | 'bsale';
 type GroupMode = 'period' | 'store';
 
 @Component({
@@ -450,7 +450,7 @@ export class TrackingAnalyticsComponent implements OnInit {
     return true;
   }
 
-  private getOrderSource(order: Order): 'web' | 'redes' | 'woocommerce' | null {
+  private getOrderSource(order: Order): 'web' | 'redes' | 'bsale' | 'woocommerce' | null {
     if (order.store_slug) {
       return 'woocommerce';
     }

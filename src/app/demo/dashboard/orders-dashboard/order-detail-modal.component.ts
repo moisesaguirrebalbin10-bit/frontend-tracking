@@ -14,10 +14,124 @@ import { OrderService } from '../../../services/order.service';
       <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title">Detalles del Pedido #{{ order?.external_id || order?.id }}</h5>
+            <h5 class="modal-title">
+            <span *ngIf="isBsaleOrder(order)" class="badge bg-info me-2" style="font-size:0.75rem">BSALE</span>
+            Detalles del Pedido #{{ order?.external_id || order?.id }}
+            </h5>
             <button type="button" class="btn-close" (click)="close()"></button>
           </div>
           <div class="modal-body" *ngIf="order">
+          <!-- BSALE-->
+          <ng-container *ngIf="isBsaleOrder(order); else internalSection">
+ 
+              <!-- Aviso solo lectura -->
+              <div class="alert alert-info py-2 px-3 small mb-3">
+                <i class="ti ti-info-circle me-1"></i>
+                Este pedido proviene de <strong>Bsale</strong> y es de solo lectura. El cambio de estado estará disponible próximamente.
+              </div>
+ 
+              <!-- Atributos Bsale destacados -->
+              <div class="row mb-3 g-2">
+                <div class="col-md-4">
+                  <div class="card border-0 bg-light h-100">
+                    <div class="card-body py-2 px-3">
+                      <p class="text-muted small mb-1">Fecha de Despacho</p>
+                      <strong>{{ order.bsale_fecha_despacho || 'N/A' }}</strong>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="card border-0 bg-light h-100">
+                    <div class="card-body py-2 px-3">
+                      <p class="text-muted small mb-1">Marca / Red Social</p>
+                      <strong>{{ order.bsale_marca_red_social || 'N/A' }}</strong>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="card border-0 bg-light h-100">
+                    <div class="card-body py-2 px-3">
+                      <p class="text-muted small mb-1">Estado del Pedido</p>
+                      <span class="badge bg-warning text-dark">{{ order.bsale_estado_pedido || 'N/A' }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+ 
+              <hr>
+ 
+              <!-- Cliente + Vendedor -->
+              <div class="row mb-4">
+                <div class="col-md-6">
+                  <h6 class="text-muted">Información del Cliente</h6>
+                  <p><strong>Nombre:</strong> {{ order.customer_name || 'N/A' }}</p>
+                  <p><strong>DNI/RUC:</strong> {{ getBsaleDni(order) }}</p>
+                  <p><strong>Email:</strong> {{ order.customer_email || 'No registrado' }}</p>
+                  <p><strong>Teléfono:</strong> {{ order.customer_phone || 'N/A' }}</p>
+                </div>
+                <div class="col-md-6">
+                  <h6 class="text-muted">Información del Vendedor</h6>
+                  <p><strong>Vendedor:</strong> {{ order.bsale_vendedor || 'N/A' }}</p>
+                  <p><strong>Fecha Emisión:</strong> {{ order.created_at | date: 'dd/MM/yyyy' }}</p>
+                  <p><strong>Boleta:</strong> {{ order.bsale_boleta || order.external_id }}</p>
+                </div>
+              </div>
+ 
+              <hr>
+ 
+              <!-- Pago -->
+              <div class="mb-4">
+                <h6 class="text-muted">Información de Pago</h6>
+                <div class="row">
+                  <div class="col-md-6">
+                    <p><strong>Métodos:</strong> {{ order.bsale_pago_metodos || 'N/A' }}</p>
+                  </div>
+                  <div class="col-md-6 text-md-end">
+                    <h5 class="text-primary"><strong>Total: {{ order.bsale_pago_monto || ('S/ ' + order.total) }}</strong></h5>
+                  </div>
+                </div>
+              </div>
+ 
+              <hr>
+ 
+              <!-- Prendas / Productos -->
+              <div class="mb-4">
+                <h6 class="text-muted">Prendas</h6>
+                <div class="table-responsive">
+                  <table class="table table-sm">
+                    <thead>
+                      <tr>
+                        <th>Nombre</th>
+                        <th>SKU</th>
+                        <th>Cantidad</th>
+                        <th>Precio Unit.</th>
+                        <th>Descuento</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr *ngFor="let prenda of getBsalePrendas(order)">
+                        <td>{{ prenda.nombre }}</td>
+                        <td><code>{{ prenda.sku }}</code></td>
+                        <td>{{ prenda.cantidad }}</td>
+                        <td>S/ {{ prenda.precioUnitario | number: '1.2-2' }}</td>
+                        <td class="text-danger">
+                          <span *ngIf="prenda.descuentoAplicado > 0">-S/ {{ prenda.descuentoAplicado | number: '1.2-2' }}</span>
+                          <span *ngIf="prenda.descuentoAplicado === 0">—</span>
+                        </td>
+                        <td><strong>S/ {{ prenda.totalAPagar | number: '1.2-2' }}</strong></td>
+                      </tr>
+                      <tr *ngIf="getBsalePrendas(order).length === 0">
+                        <td colspan="6" class="text-muted text-center">No hay prendas registradas.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+ 
+            </ng-container>
+          <!-- FIN BSALE -->
+           <ng-template #internalSection>
             <!-- Tracking Timeline -->
             <div class="mb-4">
               <h6 class="text-muted mb-3">Estado del Pedido - Haz click en los círculos para cambiar estado</h6>
@@ -117,6 +231,7 @@ import { OrderService } from '../../../services/order.service';
             <div *ngIf="statusUpdateError" class="alert alert-danger mt-3 mb-0">
               {{ statusUpdateError }}
             </div>
+                        </ng-template>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" (click)="close()" [disabled]="isLoading">Cerrar</button>
@@ -148,6 +263,21 @@ export class OrderDetailModalComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges) {}
 
+  //==============INICIO BSALE ====================
+  isBsaleOrder(order: Order | null): boolean {
+    return order?.source === 'bsale';
+  }
+ 
+  getBsaleDni(order: Order): string {
+    const raw = order.bsale_raw ?? order.meta;
+    return raw?.cliente?.dni_ruc || 'N/A';
+  }
+ 
+  getBsalePrendas(order: Order): any[] {
+    const raw = order.bsale_raw ?? order.meta;
+    return raw?.prendas || [];
+  }
+  //===============FIN BSALE =====================
   onStatusSelected(event: { status: string; confirmed: boolean; errorReason?: string; evidenceImage?: File }) {
     if (!event.confirmed || !this.order) return;
     if (!this.canEditOrderStatus(this.order)) {

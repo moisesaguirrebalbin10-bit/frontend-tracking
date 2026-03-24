@@ -5,6 +5,7 @@ import { map, switchMap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { Order, OrderStatus, OrderTimeline, OrderLog } from '../models/order.model';
 import { WooCommerceService, WooCommerceOrder, WooCommerceOrdersFilters, WooCommerceOrdersResponse } from './woocommerce.service';
+import { BsaleService, BsaleOrder, BsaleOrdersResponse, BsalePaginationState } from './bsale.service';
 
 export interface OrdersResponse {
   data: Order[];
@@ -12,6 +13,12 @@ export interface OrdersResponse {
   last_page: number;
   total: number;
 }
+//bsale orderpage response
+export interface BsaleOrdersPageResult {
+  orders: Order[];
+  pagination: BsalePaginationState;
+}
+
 
 @Injectable({
   providedIn: 'root'
@@ -21,7 +28,8 @@ export class OrderService {
 
   constructor(
     private http: HttpClient,
-    private wooCommerceService: WooCommerceService
+    private wooCommerceService: WooCommerceService,
+    private bsaleService: BsaleService
   ) {}
 
   getOrders(page: number = 1, perPage: number = 100): Observable<OrdersResponse> {
@@ -241,6 +249,100 @@ export class OrderService {
 
     return statusMap[wooStatus] || OrderStatus.EN_PROCESO;
   }
+
+  /**
+   * ---------INICIO BSALE ---------
+   * Trae la primera página de Bsale (más recientes).
+   */
+  getBsaleOrdersFirstPage(): Observable<BsaleOrdersPageResult> {
+    return this.bsaleService.getFirstPage().pipe(
+      map(({ response, pagination }) => ({
+        orders: this.transformBsaleResponse(response),
+        pagination
+      }))
+    );
+  }
+  /**
+   * Trae una página específica de Bsale usando paginación inversa.
+   * @param page 
+   * @param total
+   */
+  getBsaleOrdersPage(page: number, total: number): Observable<BsaleOrdersPageResult> {
+    return this.bsaleService.getPage(page, total).pipe(
+      map(({ response, pagination }) => ({
+        orders: this.transformBsaleResponse(response),
+        pagination
+      }))
+    );
+  }
+  /**
+   * Transforma el array de items Bsale al modelo interno Order[].
+   */
+  private transformBsaleResponse(response: BsaleOrdersResponse): Order[] {
+    return response.items.map(item => this.transformBsaleOrder(item));
+  }
+
+  transformBsaleOrder(bsaleOrder: BsaleOrder): Order {
+    // Parsear el monto total ("S/ 100.00" → 100)
+    const montoRaw = bsaleOrder.pago?.montoTotal ?? '';
+    const totalNumeric = parseFloat(montoRaw.replace(/[^0-9.]/g, '')) || 0;
+ 
+    // Parsear fechaEmision a ISO para que el pipe date funcione
+    // Formato original: "24/03/2026, 12:00 AM"
+    const parsedDate = this.parseBsaleDate(bsaleOrder.fechaEmision);
+ 
+    return {
+      id: 0, // Bsale no tiene ID numérico interno en este endpoint
+      external_id: bsaleOrder.boleta,
+      status: OrderStatus.EN_PROCESO, // Solo lectura por ahora
+      total: totalNumeric,
+      customer_name: bsaleOrder.cliente?.nombre || 'Sin nombre',
+      customer_email: bsaleOrder.cliente?.email || undefined,
+      customer_phone: bsaleOrder.cliente?.telefono || undefined,
+      source: 'bsale',
+      delivery_location: undefined,
+      created_at: parsedDate,
+      updated_at: parsedDate,
+      meta: bsaleOrder, 
+ 
+      items: (bsaleOrder.prendas || []).map((prenda, index) => ({
+        id: index,
+        product_name: `${prenda.nombre} (SKU: ${prenda.sku})`,
+        quantity: prenda.cantidad,
+        price: prenda.totalAPagar
+      })),
+ 
+      // Campos exclusivos de Bsale
+      bsale_boleta: bsaleOrder.boleta,
+      bsale_vendedor: bsaleOrder.vendedor,
+      bsale_fecha_despacho: bsaleOrder.atributos?.fechaDespacho,
+      bsale_marca_red_social: bsaleOrder.atributos?.marcaRedSocial,
+      bsale_estado_pedido: bsaleOrder.atributos?.estadoPedido,
+      bsale_pago_metodos: bsaleOrder.pago?.metodos,
+      bsale_pago_monto: bsaleOrder.pago?.montoTotal,
+      bsale_raw: bsaleOrder,
+ 
+      // No tiene tracking interno
+      can_update_status: false,
+      update_status_message: 'Los pedidos de Bsale solo lectura.'
+    };
+  }
+  /**
+   *  date pipe.
+   */
+  private parseBsaleDate(dateStr: string): string {
+    if (!dateStr) return new Date().toISOString();
+    try {
+      const [datePart, timePart] = dateStr.split(', ');
+      const [day, month, year] = datePart.split('/');
+      return new Date(`${year}-${month}-${day}T00:00:00`).toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  }
+ /**
+   * ---------------FIN BSALE ------------------
+   */
 
   private findInternalOrderIdByExternalIdPage(
     targetExternalId: string,

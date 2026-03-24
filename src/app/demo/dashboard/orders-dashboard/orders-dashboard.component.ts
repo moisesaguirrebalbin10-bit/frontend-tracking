@@ -730,7 +730,7 @@ export class OrdersDashboardComponent implements OnInit {
     return this.getStatusClass(order.status);
   }
 
-  getOrderSource(order: Order): 'web' | 'redes' | 'woocommerce' | null {
+  getOrderSource(order: Order): 'web' | 'redes' | 'bsale' | 'woocommerce' | null {
     if (order.store_slug) {
       return 'woocommerce';
     }

@@ -6,6 +6,7 @@ import { OrderService } from '../../../services/order.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from '../../dashboard/orders-dashboard/order-detail-modal.component';
 import { RouteSearchService } from '../../../theme/shared/service/route-search.service';
+import { BsaleService, BsalePaginationState } from '../../../services/bsale.service';
 
 interface StoreFilterOption {
   slug: string;
@@ -39,6 +40,13 @@ interface StoreFilterOption {
                       class="btn btn-sm"
                       [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'"
                       (click)="setDataSource('woocommerce')">WooCommerce</button>
+                      <!--BSALE-->
+                       <button type="button" class="btn btn-sm"
+                      [ngClass]="dataSource() === 'bsale' ? 'btn-info' : 'btn-outline-info'"
+                      (click)="setDataSource('bsale')">
+                      <i class="ti ti-receipt me-1"></i>Bsale
+                    </button>
+                      <!--FIN BSALE-->
                     <button type="button"
                       class="btn btn-sm"
                       [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'"
@@ -64,6 +72,7 @@ interface StoreFilterOption {
               <div class="table-responsive">
                 <table class="table table-striped table-hover">
                   <thead>
+
                     <tr>
                       <th>Boleta Bsale</th>
                       <th>ID Woo</th>
@@ -167,21 +176,29 @@ export class OrdersListComponent implements OnInit {
   loading = signal(false);
   currentPage = signal(1);
   lastPage = signal(1);
-  dataSource = signal<'internal' | 'woocommerce' | 'all'>('all');
+  dataSource = signal<'internal' | 'woocommerce' | 'bsale' | 'all'>('all');
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
   availableStores = signal<StoreFilterOption[]>([]);
   selectedStoreSlugs = signal<string[]>([]);
 
+
+  // ── Estado Bsale ──────────────────────────────
+  bsaleOrders     = signal<Order[]>([]);
+  bsalePagination = signal<BsalePaginationState | null>(null);
+
   private readonly itemsPerPage = 100;
   private routeSearchService = inject(RouteSearchService);
 
   constructor(
-    private orderService: OrderService
+    private orderService: OrderService,
+    private bsaleService: BsaleService
   ) {
     effect(() => {
       const searchTerm = this.routeSearchService.ordersTerm();
-      this.applySearch(searchTerm);
+      if (this.dataSource() !== 'bsale') {
+        this.applySearch(searchTerm);
+      }
     });
   }
 
@@ -205,10 +222,42 @@ export class OrdersListComponent implements OnInit {
     });
   }
 
-  setDataSource(source: 'internal' | 'woocommerce' | 'all') {
+  // ---------INICIO BSALE ---------
+  private loadBsalePage1() {
+    this.loading.set(true);
+    this.orderService.getBsaleOrdersFirstPage().subscribe({
+      next: ({ orders, pagination }) => {
+        this.bsaleOrders.set(orders);
+        this.bsalePagination.set(pagination);
+        this.loading.set(false);
+      },
+      error: () => this.loading.set(false)
+    });
+  }
+ 
+  reloadAll() {
+    if (this.dataSource() === 'bsale') {
+      this.bsaleService.resetCache();
+      this.loadBsalePage1();
+    } else {
+      this.loadOrders();
+    }
+  }
+ 
+  // ---------------FIN BSALE ------------------
+  setDataSource(source: 'internal' | 'woocommerce' | 'bsale' | 'all') {
     this.dataSource.set(source);
     this.selectedStoreSlugs.set([]);
     this.currentPage.set(1);
+    //===INICIO BSALE 
+    if (source === 'bsale') {
+      
+      if (!this.bsalePagination()) {
+        this.loadBsalePage1();
+      }
+      return;
+    }
+    //===FIN BSALE====
     this.applySourceAndStoreFilters();
   }
 
@@ -243,6 +292,48 @@ export class OrdersListComponent implements OnInit {
 
     this.availableStores.set(Array.from(mapBySlug.values()).sort((a, b) => a.label.localeCompare(b.label)));
   }
+
+
+  // ── Paginación Bsale ───────────────────────────
+ 
+  bsaleTotalPages(): number {
+    const p = this.bsalePagination();
+    if (!p) return 1;
+    return this.bsaleService.getTotalPages(p.totalRegistros);
+  }
+ 
+  get bsalePageNumbers(): number[] {
+    const total = this.bsaleTotalPages(), current = this.bsalePagination()?.currentPage ?? 1, delta = 2;
+    const range: number[] = [];
+    for (let i = Math.max(1, current - delta); i <= Math.min(total, current + delta); i++) range.push(i);
+    return range;
+  }
+ 
+  bsaleGoToPage(page: number) {
+    const total = this.bsalePagination()?.totalRegistros ?? 0;
+    if (page < 1 || page > this.bsaleTotalPages()) return;
+    this.loading.set(true);
+    this.orderService.getBsaleOrdersPage(page, total).subscribe({
+      next: ({ orders, pagination }) => {
+        this.bsaleOrders.set(orders);
+        this.bsalePagination.set(pagination);
+        this.loading.set(false);
+      },
+      error: () => this.loading.set(false)
+    });
+  }
+ 
+  bsalePrevPage() {
+    const current = this.bsalePagination()?.currentPage ?? 1;
+    if (current > 1) this.bsaleGoToPage(current - 1);
+  }
+ 
+  bsaleNextPage() {
+    const current = this.bsalePagination()?.currentPage ?? 1;
+    if (current < this.bsaleTotalPages()) this.bsaleGoToPage(current + 1);
+  }
+  // ---------------FIN BSALE ------------------
+
 
   getStatusClass(status: OrderStatus | string): string {
     switch ((status as string)?.toUpperCase()) {
@@ -398,7 +489,7 @@ export class OrdersListComponent implements OnInit {
     }
   }
 
-  getOrderSource(order: Order): 'web' | 'redes' | 'woocommerce' | null {
+  getOrderSource(order: Order): 'web' | 'redes' | 'woocommerce' | 'bsale' |  null {
     if (order.store_slug) {
       return 'woocommerce';
     }
@@ -422,11 +513,16 @@ export class OrdersListComponent implements OnInit {
     if (!order.user) {
       return 'woocommerce';
     }
+    //ORDENS DE BSALE
+    if (order.source === 'bsale')          return 'bsale';
     // other roles (admin, delivery, etc.) are not classified
     return null;
   }
 
   getSourceDisplay(order: Order): string {
+
+    if (order.source === 'bsale') return 'Bsale';
+
     if (order.store_slug) {
       return order.store_slug;
     }
@@ -461,6 +557,9 @@ export class OrdersListComponent implements OnInit {
     return '-';
   }
   getSourceBadgeClass(order: Order): string {
+
+    if (order.source === 'bsale') return 'bg-info';
+
     if (order.source === 'woocommerce' || (order.woo_source && !order.user)) {
       return 'bg-warning';
     }
@@ -651,14 +750,14 @@ export class OrdersListComponent implements OnInit {
     const isWoo = this.getOrderSource(order) === 'woocommerce';
 
     if (this.dataSource() === 'internal') {
-      return !isWoo;
+      return !isWoo && order.source !== 'bsale';
     }
 
     if (this.dataSource() === 'woocommerce') {
-      return isWoo;
+      return isWoo && this.matchesStoreFilter(order);
     }
 
-    return true;
+    return order.source !== 'bsale' && (isWoo ? this.matchesStoreFilter(order) : true);
   }
 
   private matchesStoreFilter(order: Order): boolean {

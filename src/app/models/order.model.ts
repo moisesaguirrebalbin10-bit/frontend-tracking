@@ -7,12 +7,13 @@ export interface Order {
   customer_email?: string;
   customer_phone?: string;
   // 'source' is not provided by API; we'll infer it client-side
-  source?: 'web' | 'redes' | 'woocommerce';
+  source?: 'web' | 'redes' | 'woocommerce' | 'bsale';
   delivery_location?: string;
   delivery_coordinates?: {
     lat: number;
     lng: number;
   };
+  
   delivery_date?: string;
   estimated_delivery_date?: string; // Fecha estimada de entrega (de WooCommerce metadata)
   error_reason?: string;
@@ -42,6 +43,17 @@ export interface Order {
     serie?: string;
   };
 
+  //------------INICIO BSALE ----------------
+  // campos de Bsale 
+  bsale_boleta?: string;
+  bsale_vendedor?: string;
+  bsale_fecha_despacho?: string;
+  bsale_marca_red_social?: string;
+  bsale_estado_pedido?: string;
+  bsale_pago_metodos?: string;
+  bsale_pago_monto?: string;
+  bsale_raw?: any;
+//------------FIN BSALE ----------------
   // Frontend helper fields for Woo/internal reconciliation.
   internal_order_id?: number;
   can_update_status?: boolean;
