@@ -211,7 +211,7 @@ interface StoreFilterOption {
                       <td class="fw-semibold">{{ order.external_id || '-' }}</td>
                       <td>{{ getBsaleSerieDisplay(order) }}</td>
                       <td>{{ order.customer_name }}</td>
-                      <td>{{ order.created_at | date: 'short' }}</td>
+                      <td>{{ getOrderCreatedAtDisplay(order) }}</td>
                       <td>{{ getEstimatedDeliveryDisplay(order) }}</td>
                       <td>{{ order.status === 'ENTREGADO' && order.delivery_date ? (order.delivery_date | date: 'short') : '-' }}</td>
                       <td><small>{{ getDeliveryLocationDisplay(order) }}</small></td>
@@ -295,6 +295,42 @@ interface StoreFilterOption {
   `]
 })
 export class OrdersDashboardComponent implements OnInit {
+
+  /**
+   * Devuelve la fecha de creación del pedido, priorizando meta.date_created (Woo) y mostrando siempre en hora Perú.
+   */
+  getOrderCreatedAtDisplay(order: any): string {
+    let meta = order.meta;
+    if (typeof meta === 'string') {
+      try {
+        meta = JSON.parse(meta);
+      } catch {
+        meta = {};
+      }
+    }
+    let result;
+    if (
+      (order.source === 'woocommerce' || order.store_slug) &&
+      meta &&
+      typeof meta === 'object' &&
+      meta.date_created
+    ) {
+      result = meta.date_created;
+    } else {
+      result = order.created_at;
+    }
+    // Log temporal para depuración
+    console.log('Pedido:', order.id, 'source:', order.source, 'store_slug:', order.store_slug, 'meta:', meta, 'date_created:', meta.date_created, 'created_at:', order.created_at, 'usado:', result);
+    // Formatear a dd/MM/yy HH:mm si es posible
+    if (!result) return '-';
+    let d = result.replace('T', ' ').replace(/-/g, '/');
+    let [datePart, timePart] = d.split(' ');
+    if (!datePart || !timePart) return result;
+    let [yyyy, mm, dd] = datePart.split('/');
+    let [hh, min] = timePart.split(':');
+    if (!yyyy || !mm || !dd || !hh || !min) return result;
+    return `${dd}/${mm.slice(0,2)}/${yyyy.slice(2)} ${hh}:${min}`;
+  }
 
     // Maneja el click en un botón de tienda Woo, asegurando que si está en Bsale cambie a 'all' antes de alternar la tienda
     onStoreButtonClick(slug: string) {

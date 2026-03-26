@@ -1,3 +1,4 @@
+
 import { Component, OnInit, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { forkJoin, Observable, of } from 'rxjs';
@@ -86,7 +87,7 @@ interface StoreFilterOption {
                     <tr *ngFor="let order of getCombinedOrders()">
                       <td>{{ getBsaleSerieDisplay(order) }}</td>
                       <td>{{ order.customer_name }}</td>
-                      <td>{{ order.created_at | date: 'short' }}</td>
+                      <td>{{ getOrderCreatedAtDisplay(order) }}</td>
                       <td>{{ getEstimatedDeliveryDisplay(order) }}</td>
                       <td>{{ order.status === 'ENTREGADO' && order.delivery_date ? (order.delivery_date | date:'short') : '-' }}</td>
                       <td>
@@ -188,6 +189,44 @@ interface StoreFilterOption {
   `]
 })
 export class OrdersListComponent implements OnInit {
+   
+  getOrderCreatedAtDisplay(order: any): string {
+    let meta = order.meta;
+    if (typeof meta === 'string') {
+      try {
+        meta = JSON.parse(meta);
+      } catch (e) {
+        meta = {};
+      }
+    }
+    let result = '';
+    if (order.source === 'woocommerce' || (order.store_slug && order.store_slug !== 'bsale')) {
+      if (meta && meta.date_created) {
+        result = meta.date_created;
+      }
+      // Nunca usar created_at para Woo
+    } else if (order.created_at) {
+      result = order.created_at;
+    }
+    // Log para depuración
+    console.log('Pedido:', order.id, 'source:', order.source, 'store_slug:', order.store_slug, 'meta:', meta, 'date_created:', meta?.date_created, 'created_at:', order.created_at, 'usado:', result);
+    // Formatear a dd/MM/yy HH:mm si hay valor
+    if (result) {
+      const date = new Date(result);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleString('es-PE', {
+          day: '2-digit',
+          month: '2-digit',
+          year: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+      }
+    }
+    return '-';
+  }
+
   // Usar siempre el término global reactivo
   private get globalSearchTerm(): string {
     return this.routeSearchService.ordersTerm();
