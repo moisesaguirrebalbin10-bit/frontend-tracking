@@ -33,7 +33,7 @@ import { OrderService } from '../../../services/order.service';
               <!-- Atributos Bsale destacados -->
               <div class="row mb-3 g-2">
                 <div class="col-md-4">
-                  <div class="card border-0 bg-light h-100">
+                  <div class="card border-0 bsale-highlight-card h-100">
                     <div class="card-body py-2 px-3">
                       <p class="text-muted small mb-1">Fecha de Despacho</p>
                       <strong>{{ order.bsale_fecha_despacho || 'N/A' }}</strong>
@@ -41,7 +41,7 @@ import { OrderService } from '../../../services/order.service';
                   </div>
                 </div>
                 <div class="col-md-4">
-                  <div class="card border-0 bg-light h-100">
+                  <div class="card border-0 bsale-highlight-card h-100">
                     <div class="card-body py-2 px-3">
                       <p class="text-muted small mb-1">Marca / Red Social</p>
                       <strong>{{ order.bsale_marca_red_social || 'N/A' }}</strong>
@@ -49,7 +49,7 @@ import { OrderService } from '../../../services/order.service';
                   </div>
                 </div>
                 <div class="col-md-4">
-                  <div class="card border-0 bg-light h-100">
+                  <div class="card border-0 bsale-highlight-card h-100">
                     <div class="card-body py-2 px-3">
                       <p class="text-muted small mb-1">Estado del Pedido</p>
                       <span class="badge bg-warning text-dark">{{ order.bsale_estado_pedido || 'N/A' }}</span>
@@ -245,6 +245,21 @@ import { OrderService } from '../../../services/order.service';
     .modal.show {
       display: block;
       background-color: rgba(0, 0, 0, 0.5);
+    }
+
+    .bsale-highlight-card {
+      background-color: #f6f8fb;
+      border: 1px solid #e9edf3 !important;
+    }
+
+    :host-context(body.dark-mode) .bsale-highlight-card {
+      background-color: #23272f;
+      border-color: #343b46 !important;
+      color: #e5e7eb;
+    }
+
+    :host-context(body.dark-mode) .bsale-highlight-card .text-muted {
+      color: #aeb8c6 !important;
     }
   `]
 })

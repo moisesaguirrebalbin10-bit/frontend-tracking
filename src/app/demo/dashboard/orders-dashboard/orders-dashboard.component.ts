@@ -1,11 +1,14 @@
+
 import { Component, OnInit, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { forkJoin, of, Observable } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
 import { OrderService } from '../../../services/order.service';
 import { Order, OrderStatus } from '../../../models/order.model';
 import { OrderDetailModalComponent } from './order-detail-modal.component';
 import { RouteSearchService } from '../../../theme/shared/service/route-search.service';
+import { BsaleService, BsalePaginationState } from '../../../services/bsale.service';
 
 interface StoreFilterOption {
   slug: string;
@@ -32,12 +35,34 @@ interface StoreFilterOption {
             <div class="btn-group flex-grow-1" role="group">
               <button type="button" class="btn" [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('all')">Todos</button>
               <button type="button" class="btn" [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('woocommerce')">WooCommerce</button>
+              <button type="button" class="btn" [ngClass]="dataSource() === 'bsale' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('bsale')">
+                <i class="ti ti-receipt me-1"></i>Bsale
+              </button>
             </div>
-            <button class="btn btn-outline-secondary" (click)="loadAllOrdersOnce(true)" [disabled]="loading()" title="Recargar pedidos desde el servidor" style="white-space:nowrap">
+            <button class="btn btn-outline-secondary" (click)="reloadAll()" [disabled]="loading()" title="Recargar pedidos desde el servidor" style="white-space:nowrap">
               <span *ngIf="loading()" class="spinner-border spinner-border-sm me-1" role="status"></span>
               <i *ngIf="!loading()" class="ti ti-refresh me-1"></i>
               Recargar
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filtro por Estado -->
+      <div class="row mb-3 g-2">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-body py-2">
+              <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span class="text-muted fw-semibold"><i class="ti ti-filter me-1"></i>Estado:</span>
+                <button class="btn btn-sm"
+                  [ngClass]="selectedStatusFilter() === '' ? 'btn-primary' : 'btn-outline-primary'"
+                  (click)="setStatusFilter('')">Todos</button>
+                <button class="btn btn-sm" *ngFor="let s of allStatuses"
+                  [ngClass]="selectedStatusFilter() === s.value ? 'btn-primary' : 'btn-outline-secondary'"
+                  (click)="setStatusFilter(s.value)">{{ s.label }}</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -75,13 +100,19 @@ interface StoreFilterOption {
                 <span class="text-muted fw-semibold"><i class="ti ti-building-store me-1"></i>Tienda:</span>
                 <button
                   class="btn btn-sm"
-                  [ngClass]="selectedStoreSlugs().length === 0 ? 'btn-primary' : 'btn-outline-primary'"
-                  (click)="clearStoreFilter()">Todas</button>
+                  [ngClass]="selectedStoreSlugs().length === 0 && dataSource() !== 'bsale' ? 'btn-primary' : 'btn-outline-primary'"
+                  (click)="clearStoreFilter(); setDataSource('all')">Todas</button>
+                <button
+                  class="btn btn-sm"
+                  [ngClass]="dataSource() === 'bsale' ? 'btn-info' : 'btn-outline-info'"
+                  (click)="clearStoreFilter(); setDataSource('bsale')">
+                  <i class="ti ti-receipt me-1"></i>Bsale
+                </button>
                 <button
                   *ngFor="let store of availableStores()"
                   class="btn btn-sm"
-                  [ngClass]="isStoreSelected(store.slug) ? 'btn-warning' : 'btn-outline-secondary'"
-                  (click)="toggleStore(store.slug)">{{ store.label }}</button>
+                  [ngClass]="isStoreSelected(store.slug) && dataSource() !== 'bsale' ? 'btn-warning' : 'btn-outline-secondary'"
+                  (click)="onStoreButtonClick(store.slug)">{{ store.label }}</button>
               </div>
             </div>
           </div>
@@ -129,6 +160,14 @@ interface StoreFilterOption {
             </div>
           </div>
         </div>
+        <div class="col-lg col-md-6">
+          <div class="card metric-card h-100">
+            <div class="card-body">
+              <h6 class="text-muted">Total Facturado</h6>
+              <h3 class="text-info">{{ totalBilled() | number:'1.0-0' }}</h3>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="row">
@@ -146,18 +185,22 @@ interface StoreFilterOption {
                 </div>
               </div>
 
+              <div *ngIf="!loading() && dataSource() === 'bsale' && bsaleErrorMessage()" class="alert alert-warning mb-3" role="alert">
+                {{ bsaleErrorMessage() }}
+              </div>
+
               <div *ngIf="!loading()" class="table-responsive">
                 <table class="table table-striped table-hover align-middle mb-0">
                   <thead>
                     <tr>
+                      <th>N° Pedido</th>
                       <th>Boleta Bsale</th>
-                      <th>ID Woo</th>
                       <th>Nombre</th>
                       <th>Fecha</th>
-                      <th>Fecha de Entrega</th>
-                      <th>Fecha Entregado</th>
+                      <th>F. Entrega</th>
+                      <th>F. Entregado</th>
                       <th>Ubicación</th>
-                      <th>Precio</th>
+                      <th>Total</th>
                       <th>Estado</th>
                       <th>Tienda/Vendedor</th>
                       <th>Acción</th>
@@ -165,14 +208,14 @@ interface StoreFilterOption {
                   </thead>
                   <tbody>
                     <tr *ngFor="let order of pagedOrders">
+                      <td class="fw-semibold">{{ order.external_id || '-' }}</td>
                       <td>{{ getBsaleSerieDisplay(order) }}</td>
-                      <td>{{ order.external_id }}</td>
                       <td>{{ order.customer_name }}</td>
                       <td>{{ order.created_at | date: 'short' }}</td>
                       <td>{{ getEstimatedDeliveryDisplay(order) }}</td>
                       <td>{{ order.status === 'ENTREGADO' && order.delivery_date ? (order.delivery_date | date: 'short') : '-' }}</td>
                       <td><small>{{ getDeliveryLocationDisplay(order) }}</small></td>
-                      <td>$ {{ order.total }}</td>
+                      <td class="fw-semibold text-nowrap">{{ getCurrencySymbol(order) }} {{ order.total | number:'1.0-2' }}</td>
                       <td>
                         <span class="badge" [ngClass]="getStatusClassForOrder(order)">
                           {{ getStatusLabel(order) }}
@@ -194,7 +237,7 @@ interface StoreFilterOption {
                 </table>
               </div>
 
-              <div *ngIf="!loading() && totalPages > 1" class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+              <div *ngIf="!loading() && dataSource() !== 'bsale' && totalPages > 1" class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
                 <small class="text-muted">Página {{ currentPage() }} de {{ totalPages }}</small>
                 <nav>
                   <ul class="pagination pagination-sm mb-0">
@@ -216,6 +259,23 @@ interface StoreFilterOption {
                   </ul>
                 </nav>
               </div>
+
+              <div *ngIf="!loading() && showBsalePagination()" class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+                <small class="text-muted">Página {{ bsalePagination()?.currentPage ?? 1 }} de {{ bsaleTotalPages() }}</small>
+                <nav>
+                  <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item" [class.disabled]="(bsalePagination()?.currentPage ?? 1) === 1">
+                      <button class="page-link" (click)="bsalePrevPage()" [disabled]="(bsalePagination()?.currentPage ?? 1) === 1">&lsaquo;</button>
+                    </li>
+                    <li *ngFor="let p of bsalePageNumbers" class="page-item" [class.active]="p === (bsalePagination()?.currentPage ?? 1)">
+                      <button class="page-link" (click)="bsaleGoToPage(p)">{{ p }}</button>
+                    </li>
+                    <li class="page-item" [class.disabled]="(bsalePagination()?.currentPage ?? 1) === bsaleTotalPages()">
+                      <button class="page-link" (click)="bsaleNextPage()" [disabled]="(bsalePagination()?.currentPage ?? 1) === bsaleTotalPages()">&rsaquo;</button>
+                    </li>
+                  </ul>
+                </nav>
+              </div>
             </div>
           </div>
         </div>
@@ -229,15 +289,22 @@ interface StoreFilterOption {
       border-radius: 8px;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
-
     .badge {
       font-size: 0.8em;
     }
   `]
 })
 export class OrdersDashboardComponent implements OnInit {
+
+    // Maneja el click en un botón de tienda Woo, asegurando que si está en Bsale cambie a 'all' antes de alternar la tienda
+    onStoreButtonClick(slug: string) {
+      if (this.dataSource() === 'bsale') {
+        this.setDataSource('all');
+      }
+      this.toggleStore(slug);
+    }
   timeframe = signal<'day' | 'week' | 'month' | 'range'>('day');
-  dataSource = signal<'woocommerce' | 'all'>('all');
+  dataSource = signal<'woocommerce' | 'bsale' | 'all'>('all');
   dateFrom = signal<string>('');
   dateTo = signal<string>('');
 
@@ -252,18 +319,51 @@ export class OrdersDashboardComponent implements OnInit {
   inProgressOrders = signal(0);
   errorOrders = signal(0);
   cancelledOrders = signal(0);
+  totalBilled = signal(0);
+
+  selectedStatusFilter = signal<string>('');
+
+  readonly allStatuses = [
+    { value: 'EN_PROCESO',  label: 'En Proceso' },
+    { value: 'EMPAQUETADO', label: 'Empaquetado' },
+    { value: 'DESPACHADO',  label: 'Despachado' },
+    { value: 'EN_CAMINO',   label: 'En Camino' },
+    { value: 'ENTREGADO',   label: 'Entregado' },
+    { value: 'ERROR',       label: 'Error' },
+    { value: 'CANCELADO',   label: 'Cancelado' },
+  ];
 
   currentPage = signal(1);
-  readonly pageSize = 100;
+  readonly pageSize = 50;
 
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
   availableStores = signal<StoreFilterOption[]>([]);
   selectedStoreSlugs = signal<string[]>([]);
+  bsaleOrders = signal<Order[]>([]);
+  bsalePagination = signal<BsalePaginationState | null>(null);
+  bsaleErrorMessage = signal<string | null>(null);
   private hasFullDataset = signal(false);
   private routeSearchService = inject(RouteSearchService);
 
   get pageRangeLabel(): string {
+    if (this.dataSource() === 'bsale') {
+      const pagination = this.bsalePagination();
+      const isDayFilter = this.timeframe() === 'day';
+      const total = isDayFilter
+        ? this.filteredOrders().length
+        : (pagination?.totalRegistros ?? this.filteredOrders().length);
+      if (total === 0) return '0 pedidos encontrados';
+      if (isDayFilter) {
+        return `Mostrando ${total} pedidos del día (últimos ${pagination?.limit ?? this.pageSize} registros cargados)`;
+      }
+      const currentPage = pagination?.currentPage ?? 1;
+      const limit = pagination?.limit ?? this.pageSize;
+      const start = (currentPage - 1) * limit + 1;
+      const end = Math.min(currentPage * limit, total);
+      return `Mostrando ${start}–${end} de ${total} pedidos`;
+    }
+
     const total = this.apiTotal();
     if (total === 0) return '0 pedidos encontrados';
     const start = (this.currentPage() - 1) * this.pageSize + 1;
@@ -272,11 +372,18 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   get pagedOrders(): Order[] {
+    if (this.dataSource() === 'bsale') {
+      return this.filteredOrders();
+    }
+
     const start = (this.currentPage() - 1) * this.pageSize;
     return this.filteredOrders().slice(start, start + this.pageSize);
   }
 
   get totalPages(): number {
+    if (this.dataSource() === 'bsale') {
+      return this.bsaleTotalPages();
+    }
     return this.apiLastPage();
   }
 
@@ -293,11 +400,16 @@ export class OrdersDashboardComponent implements OnInit {
 
   goToPage(page: number) {
     if (page < 1 || page > this.totalPages) return;
+    if (this.dataSource() === 'bsale') {
+      this.bsaleGoToPage(page);
+      return;
+    }
     this.currentPage.set(page);
   }
 
   constructor(
-    private orderService: OrderService
+    private orderService: OrderService,
+    private bsaleService: BsaleService
   ) {
     effect(() => {
       this.routeSearchService.currentTerm();
@@ -308,12 +420,19 @@ export class OrdersDashboardComponent implements OnInit {
 
   ngOnInit() {
     this.loadAllOrdersOnce(true);
+    this.preloadBsaleForAll();
+  }
+
+  setStatusFilter(status: string) {
+    this.selectedStatusFilter.set(status);
+    this.currentPage.set(1);
+    this.applyFilters();
   }
 
   setTimeframe(tf: 'day' | 'week' | 'month' | 'range') {
     this.timeframe.set(tf);
     this.currentPage.set(1);
-    if (tf === 'range' && !this.hasFullDataset()) {
+    if (this.dataSource() !== 'bsale' && tf === 'range' && !this.hasFullDataset()) {
       this.loadAllOrdersOnce(true);
       return;
     }
@@ -339,10 +458,26 @@ export class OrdersDashboardComponent implements OnInit {
     this.applyFilters();
   }
 
-  setDataSource(source: 'woocommerce' | 'all') {
+  setDataSource(source: 'woocommerce' | 'bsale' | 'all') {
     this.dataSource.set(source);
     this.selectedStoreSlugs.set([]);
+    if (source !== 'bsale') {
+      this.bsaleErrorMessage.set(null);
+    }
     this.currentPage.set(1);
+    if (source === 'bsale') {
+      if (!this.bsalePagination()) {
+        this.loadBsalePage1();
+      } else {
+        this.applyFilters();
+      }
+      return;
+    }
+
+    if (source === 'all' && !this.bsalePagination()) {
+      this.preloadBsaleForAll();
+    }
+
     this.applyFilters();
   }
 
@@ -351,7 +486,7 @@ export class OrdersDashboardComponent implements OnInit {
     const idx = current.indexOf(slug);
     this.selectedStoreSlugs.set(idx >= 0 ? current.filter(s => s !== slug) : [...current, slug]);
     this.currentPage.set(1);
-    if (this.timeframe() === 'range' && !this.hasFullDataset()) {
+    if (this.dataSource() !== 'bsale' && this.timeframe() === 'range' && !this.hasFullDataset()) {
       this.loadAllOrdersOnce(true);
       return;
     }
@@ -361,7 +496,7 @@ export class OrdersDashboardComponent implements OnInit {
   clearStoreFilter() {
     this.selectedStoreSlugs.set([]);
     this.currentPage.set(1);
-    if (this.timeframe() === 'range' && !this.hasFullDataset()) {
+    if (this.dataSource() !== 'bsale' && this.timeframe() === 'range' && !this.hasFullDataset()) {
       this.loadAllOrdersOnce(true);
       return;
     }
@@ -372,13 +507,131 @@ export class OrdersDashboardComponent implements OnInit {
     return this.selectedStoreSlugs().includes(slug);
   }
 
+  private loadBsalePage1() {
+    this.loading.set(true);
+    this.orderService.getBsaleOrdersFirstPage().subscribe({
+      next: ({ orders, pagination }) => {
+        this.bsaleErrorMessage.set(null);
+        this.bsaleOrders.set(this.sortOrdersByCreatedAtDesc(orders));
+        this.bsalePagination.set(pagination);
+        this.currentPage.set(pagination.currentPage);
+        this.applyFilters();
+        this.loading.set(false);
+      },
+      error: (err) => {
+        this.bsaleErrorMessage.set(this.getBsaleErrorMessage(err));
+        this.bsaleOrders.set([]);
+        this.bsalePagination.set(null);
+        this.applyFilters();
+        this.loading.set(false);
+      }
+    });
+  }
+
+  reloadAll() {
+    if (this.dataSource() === 'bsale') {
+      this.bsaleErrorMessage.set(null);
+      this.bsaleService.resetCache();
+      this.loadBsalePage1();
+      return;
+    }
+
+    if (this.dataSource() === 'all') {
+      this.bsaleErrorMessage.set(null);
+      this.bsaleService.resetCache();
+      this.preloadBsaleForAll(true);
+    }
+
+    this.loadAllOrdersOnce(true);
+  }
+
+  private preloadBsaleForAll(forceRefresh: boolean = false) {
+    if (!forceRefresh && this.bsalePagination()) {
+      return;
+    }
+
+    this.orderService.getBsaleOrdersFirstPage().subscribe({
+      next: ({ orders, pagination }) => {
+        this.bsaleOrders.set(this.sortOrdersByCreatedAtDesc(orders));
+        this.bsalePagination.set(pagination);
+
+        if (this.dataSource() === 'all') {
+          this.applyFilters();
+        }
+      },
+      error: (err) => {
+        if (this.dataSource() === 'bsale') {
+          this.bsaleErrorMessage.set(this.getBsaleErrorMessage(err));
+        }
+      }
+    });
+  }
+
+  bsaleTotalPages(): number {
+    const pagination = this.bsalePagination();
+    if (!pagination) return 1;
+    return this.bsaleService.getTotalPages(pagination.totalRegistros);
+  }
+
+  showBsalePagination(): boolean {
+    return this.dataSource() === 'bsale' && this.timeframe() !== 'day' && this.bsaleTotalPages() > 1;
+  }
+
+  get bsalePageNumbers(): number[] {
+    const total = this.bsaleTotalPages();
+    const current = this.bsalePagination()?.currentPage ?? 1;
+    const delta = 2;
+    const range: number[] = [];
+
+    for (let i = Math.max(1, current - delta); i <= Math.min(total, current + delta); i++) {
+      range.push(i);
+    }
+
+    return range;
+  }
+
+  bsaleGoToPage(page: number) {
+    const total = this.bsalePagination()?.totalRegistros ?? 0;
+    if (page < 1 || page > this.bsaleTotalPages()) return;
+
+    this.loading.set(true);
+    this.orderService.getBsaleOrdersPage(page, total).subscribe({
+      next: ({ orders, pagination }) => {
+        this.bsaleErrorMessage.set(null);
+        this.bsaleOrders.set(this.sortOrdersByCreatedAtDesc(orders));
+        this.bsalePagination.set(pagination);
+        this.currentPage.set(pagination.currentPage);
+        this.applyFilters();
+        this.loading.set(false);
+      },
+      error: (err) => {
+        this.bsaleErrorMessage.set(this.getBsaleErrorMessage(err));
+        this.loading.set(false);
+      }
+    });
+  }
+
+  bsalePrevPage() {
+    const current = this.bsalePagination()?.currentPage ?? 1;
+    if (current > 1) {
+      this.bsaleGoToPage(current - 1);
+    }
+  }
+
+  bsaleNextPage() {
+    const current = this.bsalePagination()?.currentPage ?? 1;
+    if (current < this.bsaleTotalPages()) {
+      this.bsaleGoToPage(current + 1);
+    }
+  }
+
   loadAllOrdersOnce(fullData: boolean) {
     this.loading.set(true);
     this.hasFullDataset.set(fullData);
 
     this.fetchAllInternalOrders(fullData).subscribe({
       next: (orders) => {
-        const sortedOrders = [...orders].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        const sortedOrders = this.sortOrdersByCreatedAtDesc(orders);
         this.allOrders.set(sortedOrders);
         this.refreshAvailableStores(sortedOrders);
         this.applyFilters();
@@ -392,8 +645,21 @@ export class OrdersDashboardComponent implements OnInit {
     });
   }
 
+  private sortOrdersByCreatedAtDesc(orders: Order[]): Order[] {
+    return [...orders].sort((a, b) => {
+      const aTime = new Date(a.created_at).getTime();
+      const bTime = new Date(b.created_at).getTime();
+
+      if (aTime === bTime) {
+        return (Number(b.id) || 0) - (Number(a.id) || 0);
+      }
+
+      return bTime - aTime;
+    });
+  }
+
   private fetchAllInternalOrders(fullData: boolean): Observable<Order[]> {
-    return this.orderService.getOrders(1, 100).pipe(
+    return this.orderService.getOrders(1, this.pageSize).pipe(
       switchMap(firstPage => {
         const allOrders = [...firstPage.data];
         if (!fullData) {
@@ -402,7 +668,7 @@ export class OrdersDashboardComponent implements OnInit {
         const lastPage = firstPage.last_page || 1;
         if (lastPage <= 1) return of(allOrders);
         const remaining = Array.from({ length: lastPage - 1 }, (_, i) =>
-          this.orderService.getOrders(i + 2, 100).pipe(
+          this.orderService.getOrders(i + 2, this.pageSize).pipe(
             catchError(() => of({ data: [], current_page: i + 2, last_page: lastPage, total: 0 }))
           )
         );
@@ -437,16 +703,31 @@ export class OrdersDashboardComponent implements OnInit {
 
   private applyFilters() {
     const searchTerm = this.routeSearchService.currentTerm().trim().toLowerCase();
+    const statusFilter = this.selectedStatusFilter().trim().toUpperCase();
     const now = new Date();
-    const filtered = this.allOrders()
+    const sourceOrders = this.getSourceOrdersForFilters();
+    const filtered = sourceOrders
       .filter((order) => this.matchesDataSource(order))
       .filter((order) => this.isWithinSelectedTimeframe(order.created_at, now))
       .filter((order) => this.matchesSearch(order, searchTerm))
+      .filter((order) => !statusFilter || this.normalizeStatus(order.status) === statusFilter)
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     this.filteredOrders.set(filtered);
-    this.apiTotal.set(filtered.length);
-    this.apiLastPage.set(Math.max(1, Math.ceil(filtered.length / this.pageSize)));
+    if (this.dataSource() === 'bsale') {
+      if (this.timeframe() === 'day') {
+        this.apiTotal.set(filtered.length);
+        this.apiLastPage.set(1);
+        this.currentPage.set(1);
+      } else {
+        this.apiTotal.set(this.bsalePagination()?.totalRegistros ?? filtered.length);
+        this.apiLastPage.set(this.bsaleTotalPages());
+        this.currentPage.set(this.bsalePagination()?.currentPage ?? 1);
+      }
+    } else {
+      this.apiTotal.set(filtered.length);
+      this.apiLastPage.set(Math.max(1, Math.ceil(filtered.length / this.pageSize)));
+    }
     this.totalOrders.set(filtered.length);
     this.deliveredOrders.set(filtered.filter((order) => this.normalizeStatus(order.status) === 'ENTREGADO').length);
     this.inProgressOrders.set(
@@ -454,6 +735,34 @@ export class OrdersDashboardComponent implements OnInit {
     );
     this.errorOrders.set(filtered.filter((order) => ['ERROR', 'ERROR_EN_PEDIDO'].includes(this.normalizeStatus(order.status))).length);
     this.cancelledOrders.set(filtered.filter((order) => this.normalizeStatus(order.status) === 'CANCELADO').length);
+    this.totalBilled.set(filtered.reduce((sum, o) => sum + this.toNumericTotal(o.total), 0));
+  }
+
+  private getSourceOrdersForFilters(): Order[] {
+    if (this.dataSource() === 'bsale') {
+      return this.bsaleOrders();
+    }
+
+    if (this.dataSource() === 'all' && this.bsaleOrders().length > 0) {
+      return this.sortOrdersByCreatedAtDesc([...this.allOrders(), ...this.bsaleOrders()]);
+    }
+
+    return this.allOrders();
+  }
+
+  private toNumericTotal(value: unknown): number {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    const normalized = String(value ?? '')
+      .trim()
+      .replace(/[^0-9,.-]/g, '')
+      .replace(/,(?=\d{1,2}$)/, '.')
+      .replace(/,/g, '');
+
+    const parsed = Number.parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   private normalizeStatus(status: OrderStatus | string | null | undefined): string {
@@ -524,13 +833,24 @@ export class OrdersDashboardComponent implements OnInit {
 
   private matchesDataSource(order: Order): boolean {
     const isWoo = this.getOrderSource(order) === 'woocommerce';
+    const isBsale = this.getOrderSource(order) === 'bsale';
+    const storeFilterActive = this.selectedStoreSlugs().length > 0;
 
     if (this.dataSource() === 'woocommerce') {
       return isWoo && this.matchesStoreFilter(order);
     }
 
-    // 'all': all orders pass; Woo orders must match store filter
-    return isWoo ? this.matchesStoreFilter(order) : true;
+    if (this.dataSource() === 'bsale') {
+      return isBsale;
+    }
+
+    // 'all':
+    // Si hay filtro de tienda, solo mostrar Woo de esas tiendas (no Bsale)
+    if (storeFilterActive) {
+      return isWoo && this.matchesStoreFilter(order);
+    }
+    // Si no hay filtro de tienda, mostrar ambos
+    return isWoo || isBsale;
   }
 
   private matchesStoreFilter(order: Order): boolean {
@@ -611,6 +931,10 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   getEstimatedDeliveryDisplay(order: Order): string {
+    if (order.source === 'bsale' && order.bsale_fecha_despacho) {
+      return this.formatEstimated(order.bsale_fecha_despacho);
+    }
+
     const defaultEstimatedText = 'Pedido para Provincia 2-3 dias aprox';
     const topLevelEstimated = order.estimated_delivery_date;
     if (topLevelEstimated) {
@@ -619,21 +943,19 @@ export class OrdersDashboardComponent implements OnInit {
 
     const meta = order.meta as any;
     if (meta && !Array.isArray(meta)) {
-      const metaData = Array.isArray(meta.meta_data) ? meta.meta_data : [];
-      const deliveryMeta = metaData.find((m: any) =>
-        m?.key === '_delivery_date' ||
-        m?.key === 'delivery_date' ||
-        m?.key === 'estimated_delivery_date' ||
-        m?.key === '_estimated_delivery_date' ||
-        m?.key === '_billing_fecha_entrega'
-      )?.value;
+      const deliveryMeta =
+        this.findMetaValue(meta.meta_data, '_delivery_date') ||
+        this.findMetaValue(meta.meta_data, 'delivery_date') ||
+        this.findMetaValue(meta.meta_data, 'estimated_delivery_date') ||
+        this.findMetaValue(meta.meta_data, '_estimated_delivery_date') ||
+        this.findMetaValue(meta.meta_data, '_billing_fecha_entrega');
 
       if (deliveryMeta) {
         return this.formatEstimated(String(deliveryMeta));
       }
 
-      const f1 = metaData.find((m: any) => m?.key === '_billing_fecha_entrega_1')?.value;
-      const f2 = metaData.find((m: any) => m?.key === '_billing_fecha_entrega_2')?.value;
+      const f1 = this.findMetaValue(meta.meta_data, '_billing_fecha_entrega_1');
+      const f2 = this.findMetaValue(meta.meta_data, '_billing_fecha_entrega_2');
       if (f1 && f2) return `${f1} y ${f2}`;
       if (f1) return String(f1);
     }
@@ -642,12 +964,19 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   getDeliveryLocationDisplay(order: Order): string {
+    if (order.source === 'bsale' && order.bsale_marca_red_social) {
+      return order.bsale_marca_red_social;
+    }
+
     if (order.delivery_location && order.delivery_location.trim()) {
       return order.delivery_location;
     }
 
     const meta = order.meta as any;
     if (meta && !Array.isArray(meta)) {
+      const mapAddress = this.findMetaValue(meta.meta_data, '_billing_direccion_mapa');
+      if (mapAddress) return mapAddress;
+
       const shippingAddress = `${meta.shipping?.address_1 || ''} ${meta.shipping?.city || ''}`.trim();
       if (shippingAddress) return shippingAddress;
 
@@ -656,6 +985,15 @@ export class OrdersDashboardComponent implements OnInit {
     }
 
     return '-';
+  }
+
+  private findMetaValue(metaData: any, key: string): string | null {
+    if (!Array.isArray(metaData)) {
+      return null;
+    }
+
+    const entry = metaData.find((m: any) => m?.key === key);
+    return entry?.value != null ? String(entry.value) : null;
   }
 
   getStatusClass(status: OrderStatus | string): string {
@@ -674,6 +1012,10 @@ export class OrdersDashboardComponent implements OnInit {
 
   /** Devuelve la etiqueta legible del estado, priorizando woo_status_label/woo_status del backend */
   getStatusLabel(order: Order): string {
+    if (order.source === 'bsale' && order.bsale_estado_pedido) {
+      return order.bsale_estado_pedido;
+    }
+
     const effectiveWooStatus = order.woo_status || order.meta?.status;
     const isEnProceso = (order.status as string)?.toUpperCase() === 'EN_PROCESO';
     // Si el backend ya envía la etiqueta traducida, usarla directamente
@@ -748,6 +1090,10 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   getSourceDisplay(order: Order): string {
+    if (order.source === 'bsale') {
+      return order.bsale_vendedor || 'Bsale';
+    }
+
     if (order.store_slug) {
       return order.store_slug;
     }
@@ -770,6 +1116,10 @@ export class OrdersDashboardComponent implements OnInit {
   }
 
   getBsaleSerieDisplay(order: Order): string {
+    if (order.source === 'bsale' && order.bsale_boleta) {
+      return order.bsale_boleta;
+    }
+
     const bsale = order.bsale || (order.meta as any)?.bsale;
     const serie = String(bsale?.serie || '').trim();
     const numero = String(bsale?.numero || '').trim();
@@ -788,7 +1138,25 @@ export class OrdersDashboardComponent implements OnInit {
     return '-';
   }
 
+  getBsaleBoletaId(order: Order): string | null {
+    const bsale = order.bsale || (order.meta as any)?.bsale;
+    if (bsale?.boleta_id) return String(bsale.boleta_id);
+    if (order.bsale_boleta) return order.bsale_boleta;
+    return null;
+  }
+
+  getCurrencySymbol(order: Order): string {
+    if (order.source === 'bsale') return 'S/';
+    const meta = order.meta as any;
+    if (meta?.currency === 'PEN') return 'S/';
+    return '$';
+  }
+
   getSourceBadgeClass(order: Order): string {
+    if (order.source === 'bsale') {
+      return 'bg-info';
+    }
+
     if (order.source === 'woocommerce' || (order.woo_source && !order.user)) {
       return 'bg-warning';
     }
@@ -809,5 +1177,19 @@ export class OrdersDashboardComponent implements OnInit {
   closeModal() {
     this.showModal.set(false);
     this.selectedOrder.set(null);
+  }
+
+  private getBsaleErrorMessage(err: unknown): string {
+    if (err instanceof HttpErrorResponse) {
+      if (err.status === 500) {
+        return 'No se pudieron cargar pedidos de Bsale (error 500 del servidor).';
+      }
+      if (err.status === 0) {
+        return 'No se pudo conectar al backend para consultar Bsale.';
+      }
+      return `No se pudieron cargar pedidos de Bsale (HTTP ${err.status}).`;
+    }
+
+    return 'No se pudieron cargar pedidos de Bsale. Intenta recargar en unos segundos.';
   }
 }

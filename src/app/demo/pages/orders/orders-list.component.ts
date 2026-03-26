@@ -38,7 +38,7 @@ interface StoreFilterOption {
                       (click)="setDataSource('woocommerce')">WooCommerce</button>
                       <!--BSALE-->
                        <button type="button" class="btn btn-sm"
-                      [ngClass]="dataSource() === 'bsale' ? 'btn-info' : 'btn-outline-info'"
+                      [ngClass]="dataSource() === 'bsale' ? 'btn-primary' : 'btn-outline-primary'"
                       (click)="setDataSource('bsale')">
                       <i class="ti ti-receipt me-1"></i>Bsale
                     </button>
@@ -188,6 +188,10 @@ interface StoreFilterOption {
   `]
 })
 export class OrdersListComponent implements OnInit {
+  // Usar siempre el término global reactivo
+  private get globalSearchTerm(): string {
+    return this.routeSearchService.ordersTerm();
+  }
   orders = signal<Order[]>([]);
   allOrders = signal<Order[]>([]);
   rawOrders = signal<Order[]>([]);
@@ -221,7 +225,12 @@ export class OrdersListComponent implements OnInit {
   }
 
   ngOnInit() {
-    this.loadOrders();
+    // Precarga combinada: Woo + Bsale en modo 'Todos'
+    if (this.dataSource() === 'all') {
+      this.loadOrdersWithBsale();
+    } else {
+      this.loadOrders();
+    }
   }
 
   loadOrders() {
@@ -235,6 +244,29 @@ export class OrdersListComponent implements OnInit {
       },
       error: (error) => {
         console.error('Error loading orders', error);
+        this.loading.set(false);
+      }
+    });
+  }
+
+  // Precarga combinada Woo + Bsale para modo 'Todos'
+  loadOrdersWithBsale() {
+    this.loading.set(true);
+    // Cargar Woo y Bsale en paralelo
+    forkJoin({
+      woo: this.fetchAllOrders().pipe(catchError(() => of([]))),
+      bsale: this.orderService.getBsaleOrdersFirstPage().pipe(catchError(() => of({ orders: [], pagination: null })))
+    }).subscribe({
+      next: ({ woo, bsale }) => {
+        this.allOrders.set(this.sortOrdersByCreatedAtDesc(woo));
+        this.bsaleOrders.set(bsale.orders || []);
+        this.bsalePagination.set(bsale.pagination || null);
+        this.refreshAvailableStores([...woo, ...(bsale.orders || [])]);
+        this.applySourceAndStoreFilters();
+        this.loading.set(false);
+      },
+      error: (error) => {
+        console.error('Error loading combined orders', error);
         this.loading.set(false);
       }
     });
@@ -267,16 +299,17 @@ export class OrdersListComponent implements OnInit {
     this.dataSource.set(source);
     this.selectedStoreSlugs.set([]);
     this.currentPage.set(1);
-    //===INICIO BSALE 
     if (source === 'bsale') {
-      
       if (!this.bsalePagination()) {
         this.loadBsalePage1();
       }
       return;
     }
-    //===FIN BSALE====
-    this.applySourceAndStoreFilters();
+    if (source === 'all') {
+      this.loadOrdersWithBsale();
+      return;
+    }
+    this.loadOrders();
   }
 
   toggleStore(slug: string) {
@@ -298,17 +331,26 @@ export class OrdersListComponent implements OnInit {
   }
 
   private refreshAvailableStores(orders: Order[]) {
-    const mapBySlug = new Map<string, StoreFilterOption>();
-
+    const storeSet = new Set<string>();
+    let hasBsale = false;
     for (const order of orders) {
-      const slug = (order.store_slug || '').trim();
-      if (!slug) continue;
-      if (!mapBySlug.has(slug)) {
-        mapBySlug.set(slug, { slug, label: slug });
+      if (order.store_slug) {
+        const slug = order.store_slug.trim();
+        if (slug) storeSet.add(slug);
+      }
+      if (order.source === 'bsale') {
+        hasBsale = true;
       }
     }
-
-    this.availableStores.set(Array.from(mapBySlug.values()).sort((a, b) => a.label.localeCompare(b.label)));
+    // Orden: Bsale primero si existe, luego tiendas Woo ordenadas
+    const stores: StoreFilterOption[] = [];
+    if (hasBsale) {
+      stores.push({ slug: 'bsale', label: 'Bsale' });
+    }
+    Array.from(storeSet).sort((a, b) => a.localeCompare(b)).forEach(slug => {
+      stores.push({ slug, label: slug });
+    });
+    this.availableStores.set(stores);
   }
 
 
@@ -693,11 +735,10 @@ export class OrdersListComponent implements OnInit {
 
   private matchesSearch(order: Order, term: string): boolean {
     const normalizedTerm = this.normalizeDateTerm(term);
-    const ticket = String(order.external_id || '').toLowerCase();
-    const bsaleSerie = this.getBsaleSerieDisplay(order).toLowerCase();
+    const isBsale = order.source === 'bsale';
+    // Campos comunes
     const customerName = String(order.customer_name || '').toLowerCase();
     const createdAtIso = String(order.created_at || '').toLowerCase();
-
     const createdDate = order.created_at ? new Date(order.created_at) : null;
     const createdAtShort = createdDate && !isNaN(createdDate.getTime())
       ? new Intl.DateTimeFormat('es-PE', { dateStyle: 'short' }).format(createdDate).toLowerCase()
@@ -709,9 +750,27 @@ export class OrdersListComponent implements OnInit {
       ? this.buildDateSearchCandidates(createdDate)
       : [];
 
+    // Si es Bsale, buscar por boleta, vendedor, nombre, etc.
+    if (isBsale) {
+      const bsaleSerie = this.getBsaleSerieDisplay(order).toLowerCase();
+      const bsaleVendedor = String(order.bsale_vendedor || '').toLowerCase();
+      const bsaleEstado = String(order.bsale_estado_pedido || '').toLowerCase();
+      const bsaleMarca = String(order.bsale_marca_red_social || '').toLowerCase();
+      return (
+        bsaleSerie.includes(term) ||
+        customerName.includes(term) ||
+        bsaleVendedor.includes(term) ||
+        bsaleEstado.includes(term) ||
+        bsaleMarca.includes(term) ||
+        createdAtIso.includes(term) ||
+        createdAtShort.includes(term) ||
+        createdAtDateOnly.includes(term) ||
+        createdAtDateCandidates.some((value) => value.includes(normalizedTerm))
+      );
+    }
+
+    // WooCommerce u otros: buscar por nombre, fecha, etc. (sin ID Woo)
     return (
-      ticket.includes(term) ||
-      bsaleSerie.includes(term) ||
       customerName.includes(term) ||
       createdAtIso.includes(term) ||
       createdAtShort.includes(term) ||
@@ -802,28 +861,44 @@ export class OrdersListComponent implements OnInit {
   }
 
   getCombinedOrders(): Order[] {
+    const searchTerm = this.globalSearchTerm.trim().toLowerCase();
+    let combined: Order[] = [];
     if (this.dataSource() === 'bsale') {
-      return this.bsaleOrders();
-    }
-    if (this.dataSource() === 'all') {
-      // Combine all orders (internal + woo + bsale) and apply pagination
-      const allOrders = [...this.orders()];
-      if (this.bsaleOrders().length > 0) {
-        allOrders.push(...this.bsaleOrders());
+      combined = this.bsaleOrders();
+    } else if (this.dataSource() === 'all') {
+      const selected = this.selectedStoreSlugs();
+      if (selected.length === 0) {
+        combined = [...this.orders(), ...this.bsaleOrders()];
+      } else {
+        const includeBsale = selected.includes('bsale');
+        const wooStores = selected.filter(s => s !== 'bsale');
+        if (includeBsale && wooStores.length > 0) {
+          combined = [
+            ...this.orders().filter(o => wooStores.includes(o.store_slug ?? '')),
+            ...this.bsaleOrders()
+          ];
+        } else if (includeBsale) {
+          combined = [...this.bsaleOrders()];
+        } else {
+          combined = this.orders().filter(o => wooStores.includes(o.store_slug ?? ''));
+        }
       }
-      const sortedOrders = this.sortOrdersByCreatedAtDesc(allOrders);
-      
-      // Apply pagination
-      const totalPages = Math.max(1, Math.ceil(sortedOrders.length / this.itemsPerPage));
-      if (this.currentPage() > totalPages) {
-        this.currentPage.set(totalPages);
-      }
-      
-      const start = (this.currentPage() - 1) * this.itemsPerPage;
-      const end = start + this.itemsPerPage;
-      return sortedOrders.slice(start, end);
+    } else {
+      combined = this.orders();
     }
-    return this.orders();
+    // Aplicar filtro de búsqueda global
+    if (searchTerm) {
+      combined = combined.filter(order => this.matchesSearch(order, searchTerm));
+    }
+    const sortedOrders = this.sortOrdersByCreatedAtDesc(combined);
+    // Paginación
+    const totalPages = Math.max(1, Math.ceil(sortedOrders.length / this.itemsPerPage));
+    if (this.currentPage() > totalPages) {
+      this.currentPage.set(totalPages);
+    }
+    const start = (this.currentPage() - 1) * this.itemsPerPage;
+    const end = start + this.itemsPerPage;
+    return sortedOrders.slice(start, end);
   }
 
   private matchesDataSource(order: Order): boolean {
@@ -841,6 +916,11 @@ export class OrdersListComponent implements OnInit {
   private matchesStoreFilter(order: Order): boolean {
     const selected = this.selectedStoreSlugs();
     if (selected.length === 0) return true;
+    // Si el filtro es 'bsale', filtrar por source
+    if (selected.includes('bsale')) {
+      return order.source === 'bsale';
+    }
+    // Woo: filtrar por store_slug
     return selected.includes(order.store_slug ?? '');
   }
 }

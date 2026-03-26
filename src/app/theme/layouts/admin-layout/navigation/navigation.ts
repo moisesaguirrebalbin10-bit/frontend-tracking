@@ -51,7 +51,7 @@ export const NavigationItems: NavigationItem[] = [
         type: 'item',
         classes: 'nav-item',
         url: '/orders',
-        icon: 'list',
+        icon: 'unordered-list',
         breadcrumbs: false
       }
     ]

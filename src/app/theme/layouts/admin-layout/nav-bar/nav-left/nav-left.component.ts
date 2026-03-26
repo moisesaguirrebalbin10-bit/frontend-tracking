@@ -67,7 +67,7 @@ export class NavLeftComponent implements OnInit, OnDestroy {
     const context = this.routeSearchService.activeContext();
     const currentUrl = (this.router.url || '').toLowerCase();
     if (context === 'orders' || currentUrl.startsWith('/dashboard/default')) {
-      return 'Buscar por ID Woo, Boleta Bsale, nombre o fecha';
+      return 'Buscar por boleta, nombre, vendedor o fecha';
     }
     return 'Buscar en esta vista';
   }

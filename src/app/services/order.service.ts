@@ -32,10 +32,30 @@ export class OrderService {
     private bsaleService: BsaleService
   ) {}
 
-  getOrders(page: number = 1, perPage: number = 100): Observable<OrdersResponse> {
+  getOrders(page: number = 1, perPage: number = 50): Observable<OrdersResponse> {
     const params = new HttpParams()
       .set('page', page.toString())
       .set('per_page', perPage.toString());
+    return this.http.get<OrdersResponse>(`${this.apiUrl}/orders`, { params });
+  }
+
+  getOrdersWithFilters(filters: {
+    page?: number;
+    perPage?: number;
+    status?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    store?: string;
+  }): Observable<OrdersResponse> {
+    let params = new HttpParams()
+      .set('page', (filters.page ?? 1).toString())
+      .set('per_page', (filters.perPage ?? 50).toString());
+    if (filters.status)   params = params.set('status',    filters.status);
+    if (filters.search)   params = params.set('search',    filters.search);
+    if (filters.dateFrom) params = params.set('date_from', filters.dateFrom);
+    if (filters.dateTo)   params = params.set('date_to',   filters.dateTo);
+    if (filters.store)    params = params.set('store',     filters.store);
     return this.http.get<OrdersResponse>(`${this.apiUrl}/orders`, { params });
   }
 
@@ -45,7 +65,7 @@ export class OrderService {
 
   findInternalOrderIdByExternalId(
     externalId: string | number,
-    perPage: number = 100,
+    perPage: number = 50,
     maxPages: number = 25
   ): Observable<number | null> {
     const target = String(externalId ?? '').trim();
