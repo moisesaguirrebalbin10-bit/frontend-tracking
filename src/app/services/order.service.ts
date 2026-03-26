@@ -335,7 +335,25 @@ export class OrderService {
     try {
       const [datePart, timePart] = dateStr.split(', ');
       const [day, month, year] = datePart.split('/');
-      return new Date(`${year}-${month}-${day}T00:00:00`).toISOString();
+      
+      // Parsear la hora del formato "01:16 PM"
+      let hours = 0, minutes = 0;
+      if (timePart) {
+        const [time, period] = timePart.split(' ');
+        const [hourStr, minuteStr] = time.split(':');
+        hours = parseInt(hourStr);
+        minutes = parseInt(minuteStr);
+        
+        // Convertir a formato 24 horas
+        if (period === 'PM' && hours !== 12) {
+          hours += 12;
+        } else if (period === 'AM' && hours === 12) {
+          hours = 0;
+        }
+      }
+      
+      const isoString = `${year}-${month}-${day}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+      return new Date(isoString).toISOString();
     } catch {
       return new Date().toISOString();
     }

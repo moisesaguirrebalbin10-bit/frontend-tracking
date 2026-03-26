@@ -31,7 +31,6 @@ interface StoreFilterOption {
           <div class="d-flex align-items-center gap-2 w-100">
             <div class="btn-group flex-grow-1" role="group">
               <button type="button" class="btn" [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('all')">Todos</button>
-              <button type="button" class="btn" [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('internal')">Internos</button>
               <button type="button" class="btn" [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('woocommerce')">WooCommerce</button>
             </div>
             <button class="btn btn-outline-secondary" (click)="loadAllOrdersOnce(true)" [disabled]="loading()" title="Recargar pedidos desde el servidor" style="white-space:nowrap">
@@ -238,7 +237,7 @@ interface StoreFilterOption {
 })
 export class OrdersDashboardComponent implements OnInit {
   timeframe = signal<'day' | 'week' | 'month' | 'range'>('day');
-  dataSource = signal<'internal' | 'woocommerce' | 'all'>('all');
+  dataSource = signal<'woocommerce' | 'all'>('all');
   dateFrom = signal<string>('');
   dateTo = signal<string>('');
 
@@ -340,14 +339,10 @@ export class OrdersDashboardComponent implements OnInit {
     this.applyFilters();
   }
 
-  setDataSource(source: 'internal' | 'woocommerce' | 'all') {
+  setDataSource(source: 'woocommerce' | 'all') {
     this.dataSource.set(source);
     this.selectedStoreSlugs.set([]);
     this.currentPage.set(1);
-    if (this.timeframe() === 'range' && !this.hasFullDataset()) {
-      this.loadAllOrdersOnce(true);
-      return;
-    }
     this.applyFilters();
   }
 
@@ -530,15 +525,11 @@ export class OrdersDashboardComponent implements OnInit {
   private matchesDataSource(order: Order): boolean {
     const isWoo = this.getOrderSource(order) === 'woocommerce';
 
-    if (this.dataSource() === 'internal') {
-      return !isWoo;
-    }
-
     if (this.dataSource() === 'woocommerce') {
       return isWoo && this.matchesStoreFilter(order);
     }
 
-    // 'all': internal orders always pass; Woo orders must match store filter
+    // 'all': all orders pass; Woo orders must match store filter
     return isWoo ? this.matchesStoreFilter(order) : true;
   }
 

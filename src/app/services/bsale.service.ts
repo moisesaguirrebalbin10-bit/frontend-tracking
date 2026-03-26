@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError, map, timeout } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 
 // ────────────────────────────────────────────────
@@ -153,8 +153,12 @@ export class BsaleService {
       .set('limit', limit.toString());
 
     return this.http
-      .get<BsaleOrdersResponse>(`${this.apiUrl}/bsale/orders`, { params })
+      .get<BsaleOrdersResponse>(`${this.apiUrl}/bsale/orders`, { 
+        params,
+        responseType: 'json'
+      })
       .pipe(
+        timeout(120000), // 2 minutos timeout
         catchError(err => {
           console.error('[BsaleService] Error al obtener órdenes Bsale', err);
           return of({ total_registros: 0, items: [] });

@@ -34,10 +34,6 @@ interface StoreFilterOption {
                   <div class="btn-group" role="group">
                     <button type="button"
                       class="btn btn-sm"
-                      [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'"
-                      (click)="setDataSource('internal')">Internos</button>
-                    <button type="button"
-                      class="btn btn-sm"
                       [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'"
                       (click)="setDataSource('woocommerce')">WooCommerce</button>
                       <!--BSALE-->
@@ -75,7 +71,6 @@ interface StoreFilterOption {
 
                     <tr>
                       <th>Boleta Bsale</th>
-                      <th>ID Woo</th>
                       <th>Nombre</th>
                       <th>Fecha</th>
                       <th>Fecha de Entrega</th>
@@ -88,9 +83,8 @@ interface StoreFilterOption {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr *ngFor="let order of orders()">
+                    <tr *ngFor="let order of getCombinedOrders()">
                       <td>{{ getBsaleSerieDisplay(order) }}</td>
-                      <td>{{ order.external_id }}</td>
                       <td>{{ order.customer_name }}</td>
                       <td>{{ order.created_at | date: 'short' }}</td>
                       <td>{{ getEstimatedDeliveryDisplay(order) }}</td>
@@ -119,7 +113,8 @@ interface StoreFilterOption {
               </div>
 
               <!-- Pagination -->
-              <nav *ngIf="lastPage() > 1">
+              <!-- Regular pagination for non-Bsale sources -->
+              <nav *ngIf="dataSource() !== 'bsale' && getTotalPages() > 1">
                 <ul class="pagination justify-content-center">
                   <li class="page-item" [class.disabled]="currentPage() === 1">
                     <button class="page-link" (click)="previousPage()" [disabled]="currentPage() === 1">
@@ -134,8 +129,31 @@ interface StoreFilterOption {
                     </button>
                     <span class="page-link" *ngIf="!isNumber(page)">{{ page }}</span>
                   </li>
-                  <li class="page-item" [class.disabled]="currentPage() === lastPage()">
-                    <button class="page-link" (click)="nextPage()" [disabled]="currentPage() === lastPage()">
+                  <li class="page-item" [class.disabled]="currentPage() === getTotalPages()">
+                    <button class="page-link" (click)="nextPage()" [disabled]="currentPage() === getTotalPages()">
+                      Siguiente
+                    </button>
+                  </li>
+                </ul>
+              </nav>
+
+              <!-- Bsale pagination -->
+              <nav *ngIf="dataSource() === 'bsale' && bsaleTotalPages() > 1">
+                <ul class="pagination justify-content-center">
+                  <li class="page-item" [class.disabled]="(bsalePagination()?.currentPage ?? 1) === 1">
+                    <button class="page-link" (click)="bsalePrevPage()" [disabled]="(bsalePagination()?.currentPage ?? 1) === 1">
+                      Anterior
+                    </button>
+                  </li>
+                  <li *ngFor="let page of bsalePageNumbers" 
+                    class="page-item"
+                    [class.active]="page === (bsalePagination()?.currentPage ?? 1)">
+                    <button class="page-link" (click)="bsaleGoToPage(page)">
+                      {{ page }}
+                    </button>
+                  </li>
+                  <li class="page-item" [class.disabled]="(bsalePagination()?.currentPage ?? 1) === bsaleTotalPages()">
+                    <button class="page-link" (click)="bsaleNextPage()" [disabled]="(bsalePagination()?.currentPage ?? 1) === bsaleTotalPages()">
                       Siguiente
                     </button>
                   </li>
@@ -176,7 +194,7 @@ export class OrdersListComponent implements OnInit {
   loading = signal(false);
   currentPage = signal(1);
   lastPage = signal(1);
-  dataSource = signal<'internal' | 'woocommerce' | 'bsale' | 'all'>('all');
+  dataSource = signal<'woocommerce' | 'bsale' | 'all'>('all');
   selectedOrder = signal<Order | null>(null);
   showModal = signal(false);
   availableStores = signal<StoreFilterOption[]>([]);
@@ -208,7 +226,7 @@ export class OrdersListComponent implements OnInit {
 
   loadOrders() {
     this.loading.set(true);
-    this.fetchAllInternalOrders().subscribe({
+    this.fetchAllOrders().subscribe({
       next: (orders) => {
         this.allOrders.set(this.sortOrdersByCreatedAtDesc(orders));
         this.refreshAvailableStores(this.allOrders());
@@ -216,7 +234,7 @@ export class OrdersListComponent implements OnInit {
         this.loading.set(false);
       },
       error: (error) => {
-        console.error('Error loading internal orders', error);
+        console.error('Error loading orders', error);
         this.loading.set(false);
       }
     });
@@ -245,7 +263,7 @@ export class OrdersListComponent implements OnInit {
   }
  
   // ---------------FIN BSALE ------------------
-  setDataSource(source: 'internal' | 'woocommerce' | 'bsale' | 'all') {
+  setDataSource(source: 'woocommerce' | 'bsale' | 'all') {
     this.dataSource.set(source);
     this.selectedStoreSlugs.set([]);
     this.currentPage.set(1);
@@ -351,6 +369,11 @@ export class OrdersListComponent implements OnInit {
 
   /** Devuelve la etiqueta legible del estado, priorizando woo_status_label/woo_status del backend */
   getStatusLabel(order: Order): string {
+    // Handle Bsale orders - use estadoPedido from atributos
+    if (order.source === 'bsale' && order.bsale_estado_pedido) {
+      return order.bsale_estado_pedido;
+    }
+
     const effectiveWooStatus = order.woo_status || order.meta?.status;
     const isEnProceso = (order.status as string)?.toUpperCase() === 'EN_PROCESO';
     // Si el backend ya envía la etiqueta traducida, usarla directamente
@@ -412,6 +435,11 @@ export class OrdersListComponent implements OnInit {
   }
 
   getEstimatedDeliveryDisplay(order: Order): string {
+    // Handle Bsale orders - use fechaDespacho from atributos
+    if (order.source === 'bsale' && order.bsale_fecha_despacho) {
+      return this.formatEstimated(order.bsale_fecha_despacho);
+    }
+
     const defaultEstimatedText = 'Pedido para Provincia 2-3 dias aprox';
     const topLevelEstimated = order.estimated_delivery_date;
     if (topLevelEstimated) {
@@ -441,6 +469,11 @@ export class OrdersListComponent implements OnInit {
   }
 
   getDeliveryLocationDisplay(order: Order): string {
+    // Handle Bsale orders - show marcaRedSocial as location since they don't have delivery addresses
+    if (order.source === 'bsale' && order.bsale_marca_red_social) {
+      return order.bsale_marca_red_social;
+    }
+
     if (order.delivery_location && order.delivery_location.trim()) {
       return order.delivery_location;
     }
@@ -476,7 +509,7 @@ export class OrdersListComponent implements OnInit {
   }
 
   nextPage() {
-    if (this.currentPage() < this.lastPage()) {
+    if (this.currentPage() < this.getTotalPages()) {
       this.currentPage.set(this.currentPage() + 1);
       this.applySearch(this.routeSearchService.getTermForContext('orders'));
     }
@@ -520,8 +553,10 @@ export class OrdersListComponent implements OnInit {
   }
 
   getSourceDisplay(order: Order): string {
-
-    if (order.source === 'bsale') return 'Bsale';
+    // Handle Bsale orders - show vendedor for Bsale orders
+    if (order.source === 'bsale') {
+      return order.bsale_vendedor || 'Bsale';
+    }
 
     if (order.store_slug) {
       return order.store_slug;
@@ -539,6 +574,11 @@ export class OrdersListComponent implements OnInit {
     }
   }
   getBsaleSerieDisplay(order: Order): string {
+    // Handle Bsale orders - use bsale_boleta field
+    if (order.source === 'bsale' && order.bsale_boleta) {
+      return order.bsale_boleta;
+    }
+
     const bsale = order.bsale || (order.meta as any)?.bsale;
     const serie = String(bsale?.serie || '').trim();
     const numero = String(bsale?.numero || '').trim();
@@ -585,7 +625,7 @@ export class OrdersListComponent implements OnInit {
   getPages(): (number | string)[] {
     const pages: (number | string)[] = [];
     const current = this.currentPage();
-    const last = this.lastPage();
+    const last = this.getTotalPages();
     const range = 2;
 
     if (last <= 7) {
@@ -723,7 +763,7 @@ export class OrdersListComponent implements OnInit {
     this.setLoadedOrders(filteredByStore);
   }
 
-  private fetchAllInternalOrders(): Observable<Order[]> {
+  private fetchAllOrders(): Observable<Order[]> {
     return this.orderService.getOrders(1, this.itemsPerPage).pipe(
       switchMap((firstPage) => {
         const allOrders = [...(firstPage.data || [])];
@@ -746,18 +786,56 @@ export class OrdersListComponent implements OnInit {
     );
   }
 
+  getTotalPages(): number {
+    if (this.dataSource() === 'bsale') {
+      return this.bsaleTotalPages();
+    }
+    if (this.dataSource() === 'all') {
+      // Calculate total pages for combined orders
+      const allOrders = [...this.orders()];
+      if (this.bsaleOrders().length > 0) {
+        allOrders.push(...this.bsaleOrders());
+      }
+      return Math.max(1, Math.ceil(allOrders.length / this.itemsPerPage));
+    }
+    return this.lastPage();
+  }
+
+  getCombinedOrders(): Order[] {
+    if (this.dataSource() === 'bsale') {
+      return this.bsaleOrders();
+    }
+    if (this.dataSource() === 'all') {
+      // Combine all orders (internal + woo + bsale) and apply pagination
+      const allOrders = [...this.orders()];
+      if (this.bsaleOrders().length > 0) {
+        allOrders.push(...this.bsaleOrders());
+      }
+      const sortedOrders = this.sortOrdersByCreatedAtDesc(allOrders);
+      
+      // Apply pagination
+      const totalPages = Math.max(1, Math.ceil(sortedOrders.length / this.itemsPerPage));
+      if (this.currentPage() > totalPages) {
+        this.currentPage.set(totalPages);
+      }
+      
+      const start = (this.currentPage() - 1) * this.itemsPerPage;
+      const end = start + this.itemsPerPage;
+      return sortedOrders.slice(start, end);
+    }
+    return this.orders();
+  }
+
   private matchesDataSource(order: Order): boolean {
     const isWoo = this.getOrderSource(order) === 'woocommerce';
-
-    if (this.dataSource() === 'internal') {
-      return !isWoo && order.source !== 'bsale';
-    }
 
     if (this.dataSource() === 'woocommerce') {
       return isWoo && this.matchesStoreFilter(order);
     }
 
-    return order.source !== 'bsale' && (isWoo ? this.matchesStoreFilter(order) : true);
+    // 'all': include all orders (WooCommerce, Bsale, and others)
+    // Woo orders must match store filter, Bsale and others always pass
+    return true;
   }
 
   private matchesStoreFilter(order: Order): boolean {
