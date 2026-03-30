@@ -95,6 +95,125 @@
   vertical-align: middle;
 }
 
+//FIN SELECT RANGO BSALE
+.bsale-pager-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(6, 182, 212, 0.22);
+  border-radius: 0.5rem;
+}
+ 
+.bsale-pager-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+ 
+.bsale-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bsale-accent);
+  white-space: nowrap;
+}
+ 
+.bsale-total-badge {
+  font-size: 0.78rem;
+  color: var(--bsale-accent);
+  opacity: 0.85;
+}
+ 
+.bsale-loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+ 
+.bsale-pager-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+ 
+.pager-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+ 
+.pager-field-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1;
+}
+ 
+.pager-input {
+  width: 80px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(6, 182, 212, 0.35) !important;
+  color: var(--text) !important;
+ 
+  &:focus {
+    border-color: var(--bsale-accent) !important;
+    box-shadow: 0 0 0 0.2rem rgba(6, 182, 212, 0.18) !important;
+  }
+ 
+  &::-webkit-inner-spin-button,
+  &::-webkit-outer-spin-button {
+    opacity: 0.4;
+  }
+}
+ 
+.pager-separator {
+  color: var(--muted);
+  padding-bottom: 0.35rem;
+  line-height: 2rem;
+}
+ 
+.pager-arrow {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-color: rgba(148, 163, 184, 0.3) !important;
+ 
+  &:not(:disabled):hover {
+    border-color: var(--bsale-accent) !important;
+    color: var(--bsale-accent);
+  }
+ 
+  &:disabled {
+    opacity: 0.3;
+  }
+}
+ 
+.apply-btn {
+  height: 2rem;
+  padding-inline: 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+ 
+.bsale-range-summary {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+//FIN SELECT RANGO BSALE
 @media (max-width: 768px) {
   .hero-row,
   .control-row,
@@ -108,4 +227,15 @@
   .date-field {
     min-width: 100%;
   }
+  //BSALE PAGE
+  .pager-input {
+    width: 100%;
+  }
+ 
+  .pager-arrow {
+    width: 100%;
+    height: 2.2rem;
+  }
+  //FIN BSALE PAGE
+
 }

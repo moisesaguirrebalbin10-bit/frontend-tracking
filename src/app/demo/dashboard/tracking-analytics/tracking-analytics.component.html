@@ -19,6 +19,7 @@
   <div class="card mb-3 control-card">
     <div class="card-body d-flex flex-column gap-3">
       <div class="control-row">
+        <!-- Timeframe -->
         <div class="btn-group flex-wrap" role="group">
           <button type="button" class="btn" [ngClass]="timeframe() === 'day' ? 'btn-primary' : 'btn-outline-primary'" (click)="setTimeframe('day')">Por Dia</button>
           <button type="button" class="btn" [ngClass]="timeframe() === 'week' ? 'btn-primary' : 'btn-outline-primary'" (click)="setTimeframe('week')">Por Semana</button>
@@ -26,18 +27,99 @@
           <button type="button" class="btn" [ngClass]="timeframe() === 'range' ? 'btn-primary' : 'btn-outline-primary'" (click)="setTimeframe('range')">Calendario</button>
         </div>
 
+        <!-- Data source — incluye Bsale -->
         <div class="btn-group flex-wrap" role="group">
           <button type="button" class="btn" [ngClass]="dataSource() === 'all' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('all')">Todos</button>
           <button type="button" class="btn" [ngClass]="dataSource() === 'internal' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('internal')">Internos</button>
           <button type="button" class="btn" [ngClass]="dataSource() === 'woocommerce' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('woocommerce')">WooCommerce</button>
+          <button type="button" class="btn" [ngClass]="dataSource() === 'bsale' ? 'btn-primary' : 'btn-outline-primary'" (click)="setDataSource('bsale')">Bsale</button>
         </div>
 
+        <!-- Agrupacion -->
         <div class="btn-group flex-wrap" role="group">
           <button type="button" class="btn" [ngClass]="groupMode() === 'period' ? 'btn-warning' : 'btn-outline-warning'" (click)="setGroupMode('period')">Dibujar por Periodo</button>
           <button type="button" class="btn" [ngClass]="groupMode() === 'store' ? 'btn-warning' : 'btn-outline-warning'" (click)="setGroupMode('store')">Dibujar por Tienda</button>
         </div>
       </div>
-
+      <!-- ──  RANGO DE PAGINAS BSALE ────────────────────────── -->
+      <div class="bsale-pager-row" *ngIf="showBsaleControls">
+        <div class="bsale-pager-header">
+          <span class="bsale-badge">Bsale</span>
+          <span class="filter-label">Rango de páginas</span>
+          <span class="bsale-total-badge" *ngIf="bsaleTotalPages()">
+            {{ bsaleTotalPages() }} páginas · {{ bsaleTotalPages() * 50 | number }} registros totales
+          </span>
+          <div class="bsale-loading-indicator" *ngIf="bsaleLoading()">
+            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+            <small class="text-muted ms-1">Cargando Bsale…</small>
+          </div>
+        </div>
+ 
+        <div class="bsale-pager-controls">
+          <!-- Prev -->
+          <button
+            class="btn btn-sm btn-outline-secondary pager-arrow"
+            (click)="prevBsaleRange()"
+            [disabled]="!canGoPrevBsale || bsaleLoading()"
+            title="Rango anterior"
+          >
+            ‹
+          </button>
+          <!-- Next -->
+          <button
+            class="btn btn-sm btn-outline-secondary pager-arrow"
+            (click)="nextBsaleRange()"
+            [disabled]="!canGoNextBsale || bsaleLoading()"
+            title="Rango siguiente"
+          >
+            ›
+          </button>
+          <!-- Input Desde -->
+          <div class="pager-field">
+            <label class="pager-field-label">Desde</label>
+            <input
+              type="number"
+              class="form-control form-control-sm pager-input"
+              [ngModel]="bsaleInputFrom()"
+              (ngModelChange)="bsaleInputFrom.set($event)"
+              [min]="1"
+              [max]="bsaleTotalPages() || 1"
+              [disabled]="bsaleLoading()"
+            />
+          </div>
+ 
+          <span class="pager-separator">—</span>
+ 
+          <!-- Input Hasta -->
+          <div class="pager-field">
+            <label class="pager-field-label">Hasta</label>
+            <input
+              type="number"
+              class="form-control form-control-sm pager-input"
+              [ngModel]="bsaleInputTo()"
+              (ngModelChange)="bsaleInputTo.set($event)"
+              [min]="bsaleInputFrom()"
+              [max]="bsaleTotalPages() || 1"
+              [disabled]="bsaleLoading()"
+            />
+          </div>
+ 
+          <!-- Aplicar -->
+          <button
+            class="btn btn-sm btn-info apply-btn"
+            (click)="applyBsaleRange()"
+            [disabled]="bsaleLoading()"
+          >
+            Aplicar
+          </button>
+ 
+          
+        </div>
+ 
+        <small class="text-muted bsale-range-summary">{{ bsaleRangeSummary }}</small>
+      </div>
+      <!-- ─────────────────────────────────────────────────────────────── -->
+      <!-- Rango libre de fechas -->
       <div class="range-row" *ngIf="timeframe() === 'range'">
         <div class="date-field">
           <label>Desde</label>
@@ -50,6 +132,7 @@
         <button class="btn btn-outline-secondary align-self-end" *ngIf="dateFrom() || dateTo()" (click)="clearDateRange()">Limpiar</button>
       </div>
 
+      <!-- Filtro por tienda (solo WooCommerce) -->
       <div class="store-row" *ngIf="availableStores().length">
         <span class="filter-label">Tienda:</span>
         <button class="btn btn-sm" [ngClass]="selectedStoreSlugs().length === 0 ? 'btn-primary' : 'btn-outline-primary'" (click)="clearStoreFilter()">Todas</button>
@@ -62,6 +145,7 @@
     </div>
   </div>
 
+  <!-- Métricas resumen -->
   <div class="row g-3 mb-4">
     <div class="col-xl col-md-6">
       <div class="metric-card card h-100">
@@ -103,6 +187,7 @@
     </div>
   </div>
 
+  <!-- Gráficas -->
   <div class="row g-3 mb-4">
     <div class="col-xl-8">
       <div class="card chart-card h-100">
@@ -149,6 +234,7 @@
     </div>
   </div>
 
+  <!-- Tabla dinámica -->
   <div class="card table-card">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div>

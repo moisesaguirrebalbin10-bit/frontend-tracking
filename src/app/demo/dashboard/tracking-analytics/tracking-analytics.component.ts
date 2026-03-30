@@ -29,6 +29,7 @@ type Timeframe = 'day' | 'week' | 'month' | 'range';
 type DataSource = 'all' | 'internal' | 'woocommerce' | 'bsale';
 type GroupMode = 'period' | 'store';
 
+
 @Component({
   selector: 'app-tracking-analytics',
   standalone: true,
@@ -42,6 +43,19 @@ export class TrackingAnalyticsComponent implements OnInit {
   groupMode = signal<GroupMode>('period');
   dateFrom = signal<string>('');
   dateTo = signal<string>('');
+
+  //Bsale Total de páginas disponibles
+   bsaleTotalPages = signal<number>(0);
+   //PAGINA DE RANGO INCIAL 
+   bsaleRangeFrom = signal<number>(1);
+   //PAGINA DE RANGO FINAL
+     bsaleRangeTo = signal<number>(1);
+     //INPUT DE PÁGINA PARA CARGAR TEMPORAL
+     bsaleInputFrom = signal<number>(1);
+  bsaleInputTo = signal<number>(1);
+  //INDICADOR DE CARGA DE BOLETAS BSALE
+    bsaleLoading = signal<boolean>(false);
+
 
   loading = signal(false);
   allOrders = signal<Order[]>([]);
@@ -71,13 +85,20 @@ export class TrackingAnalyticsComponent implements OnInit {
 
   loadOrders(): void {
     this.loading.set(true);
-    this.fetchAllInternalOrders().subscribe({
-      next: (orders) => {
-        const sorted = [...orders].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        this.allOrders.set(sorted);
-        this.refreshAvailableStores(sorted);
+ 
+    forkJoin({
+      internal: this.fetchAllInternalOrders(),
+      bsale: this.fetchBsaleOrdersForRange()
+    }).subscribe({
+      next: ({ internal, bsale }) => {
+        const combined = [...internal, ...bsale].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        this.allOrders.set(combined);
+        this.refreshAvailableStores(combined);
         this.rebuildAnalytics();
         this.loading.set(false);
+        this.bsaleLoading.set(false);
       },
       error: (error) => {
         console.error('Error loading tracking analytics orders', error);
@@ -85,8 +106,88 @@ export class TrackingAnalyticsComponent implements OnInit {
         this.refreshAvailableStores([]);
         this.rebuildAnalytics();
         this.loading.set(false);
+        this.bsaleLoading.set(false);
       }
     });
+  }
+
+  //ACCIONES DE RANGO BSALE
+  applyBsaleRange(): void {
+    const total = this.bsaleTotalPages();
+    let from = Math.max(1, Math.min(this.bsaleInputFrom(), total || 1));
+    let to   = Math.max(from, Math.min(this.bsaleInputTo(), total || 1));
+ 
+    this.bsaleRangeFrom.set(from);
+    this.bsaleRangeTo.set(to);
+    this.bsaleInputFrom.set(from);
+    this.bsaleInputTo.set(to);
+ 
+    this.reloadBsaleOrders();
+  }
+ 
+  prevBsaleRange(): void {
+    const span = this.bsaleRangeTo() - this.bsaleRangeFrom() + 1;
+    const newFrom = Math.max(1, this.bsaleRangeFrom() - span);
+    const newTo   = newFrom + span - 1;
+    this.bsaleRangeFrom.set(newFrom);
+    this.bsaleRangeTo.set(newTo);
+    this.bsaleInputFrom.set(newFrom);
+    this.bsaleInputTo.set(newTo);
+    this.reloadBsaleOrders();
+  }
+ 
+  nextBsaleRange(): void {
+    const total = this.bsaleTotalPages();
+    const span  = this.bsaleRangeTo() - this.bsaleRangeFrom() + 1;
+    const newFrom = Math.min(total, this.bsaleRangeTo() + 1);
+    const newTo   = Math.min(total, newFrom + span - 1);
+    this.bsaleRangeFrom.set(newFrom);
+    this.bsaleRangeTo.set(newTo);
+    this.bsaleInputFrom.set(newFrom);
+    this.bsaleInputTo.set(newTo);
+    this.reloadBsaleOrders();
+  }
+
+  //RECARGA PEDIDOS DE BSALE SEGUN RANGO
+   private reloadBsaleOrders(): void {
+    this.bsaleLoading.set(true);
+    this.fetchBsaleOrdersForRange().subscribe({
+      next: (bsaleOrders) => {
+        // Conserva los pedidos no-bsale y agrega los nuevos de bsale
+        const nonBsale = this.allOrders().filter(o => o.source !== 'bsale');
+        const combined = [...nonBsale, ...bsaleOrders].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        this.allOrders.set(combined);
+        this.refreshAvailableStores(combined);
+        this.rebuildAnalytics();
+        this.bsaleLoading.set(false);
+      },
+      error: () => {
+        this.bsaleLoading.set(false);
+      }
+    });
+  }
+ 
+  get canGoPrevBsale(): boolean {
+    return this.bsaleRangeFrom() > 1;
+  }
+ 
+  get canGoNextBsale(): boolean {
+    return this.bsaleRangeTo() < this.bsaleTotalPages();
+  }
+ 
+  get showBsaleControls(): boolean {
+    return this.dataSource() === 'bsale' || this.dataSource() === 'all';
+  }
+ 
+  get bsaleRangeSummary(): string {
+    const total = this.bsaleTotalPages();
+    if (!total) return 'Cargando paginación Bsale…';
+    const from = this.bsaleRangeFrom();
+    const to   = this.bsaleRangeTo();
+    const records = (to - from + 1) * 50;
+    return `Mostrando páginas ${from}–${to} de ${total} (~${records} registros)`;
   }
 
   setTimeframe(timeframe: Timeframe): void {
@@ -140,6 +241,7 @@ export class TrackingAnalyticsComponent implements OnInit {
     return this.selectedStoreSlugs().includes(slug);
   }
 
+
   exportCurrentView(): void {
     const summaryRows = this.analyticsRows().map((row) => ({
       Grupo: row.label,
@@ -152,17 +254,32 @@ export class TrackingAnalyticsComponent implements OnInit {
       Cancelados: row.cancelledCount
     }));
 
-    const detailRows = this.filteredOrders().map((order) => ({
-      Grupo: this.groupMode() === 'store' ? this.getStoreBucket(order).label : this.getPeriodBucket(order).label,
-      Nro_Boleta: order.external_id || order.id,
-      Cliente: order.customer_name || 'Sin nombre',
-      Productos: this.getOrderItemsSummary(order),
-      Total_Pedido: this.getOrderTotal(order),
-      Tienda: this.getOrderStoreLabel(order),
-      Estado: this.getOrderStatusLabel(order),
-      Fecha_Creacion: this.getOrderCreatedAtLabel(order)
-    }));
+    const detailRows = this.filteredOrders().map((order) => {
+      const isBsale = order.source === 'bsale';
+      const base: Record<string, any> = {
+        Grupo: this.groupMode() === 'store' ? this.getStoreBucket(order).label : this.getPeriodBucket(order).label,
+        Nro_Boleta: order.external_id || order.id,
+        Cliente: order.customer_name || 'Sin nombre',
+        Productos: this.getOrderItemsSummary(order),
+        Total_Pedido: this.getOrderTotal(order),
+        Tienda: this.getOrderStoreLabel(order),
+        Estado: this.getOrderStatusLabel(order),
+        Fecha_Creacion: this.getOrderCreatedAtLabel(order)
+      };
+ 
+      // Columnas de Bsale
+      if (isBsale) {
+        base['Vendedor'] = order.bsale_vendedor || '';
+        base['Fecha_Despacho'] = order.bsale_fecha_despacho || '';
+        base['Marca_Red_Social'] = order.bsale_marca_red_social || '';
+        base['Estado_Pedido_Bsale'] = order.bsale_estado_pedido || '';
+        base['Metodo_Pago'] = order.bsale_pago_metodos || '';
+      }
+ 
+      return base;
+    });
 
+    
     if (!summaryRows.length && !detailRows.length) {
       return;
     }
@@ -447,6 +564,9 @@ export class TrackingAnalyticsComponent implements OnInit {
     if (this.dataSource() === 'woocommerce') {
       return source === 'woocommerce';
     }
+    if (this.dataSource() === 'bsale') {
+      return source === 'bsale';
+    }
     return true;
   }
 
@@ -556,7 +676,10 @@ export class TrackingAnalyticsComponent implements OnInit {
     if (order.woo_status_label && this.normalizeStatus(order.status) === 'EN_PROCESO') {
       return order.woo_status_label;
     }
-
+    // Bsale 
+    if (order.source === 'bsale' && order.bsale_estado_pedido) {
+      return order.bsale_estado_pedido;
+    }
     const status = this.normalizeStatus(order.status);
     const labels: Record<string, string> = {
       EN_PROCESO: 'En Proceso',
@@ -662,4 +785,46 @@ export class TrackingAnalyticsComponent implements OnInit {
       })
     );
   }
+  
+  //CARGA LAS PAGINAS DE BSALE SEGUN RANGO DEFINIDO
+   private fetchBsaleOrdersForRange(): Observable<Order[]> {
+    return this.orderService.getBsaleOrdersFirstPage().pipe(
+      switchMap((firstResult) => {
+        const { orders: firstOrders, pagination } = firstResult;
+        const total      = pagination.totalRegistros;
+        const totalPages = Math.ceil(total / pagination.limit);
+ 
+        // Inicializa el total de páginas si es la primera vez
+        if (this.bsaleTotalPages() === 0) {
+          this.bsaleTotalPages.set(totalPages);
+          this.bsaleRangeFrom.set(1);
+          this.bsaleRangeTo.set(1);
+          this.bsaleInputFrom.set(1);
+          this.bsaleInputTo.set(1);
+        }
+ 
+        const from = this.bsaleRangeFrom();
+        const to   = this.bsaleRangeTo();
+ 
+        if (from === 1 && to === 1) {
+          return of(firstOrders);
+        }
+ 
+        const pageNumbers = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+        const requests = pageNumbers.map((page) =>
+          this.orderService.getBsaleOrdersPage(page, total).pipe(
+            map((r) => r.orders),
+            catchError(() => of([] as Order[]))
+          )
+        );
+ 
+        return forkJoin(requests).pipe(map((pages) => pages.flat()));
+      }),
+      catchError((err) => {
+        console.error('Error fetching Bsale range', err);
+        return of([]);
+      })
+    );
+  }
+
 }
