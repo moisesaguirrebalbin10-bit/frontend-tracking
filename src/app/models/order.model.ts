@@ -75,6 +75,7 @@ export enum OrderStatus {
   EN_CAMINO = 'EN_CAMINO',
   ENTREGADO = 'ENTREGADO',
   ERROR = 'ERROR',
+  ERROR_EN_PEDIDO = 'ERROR_EN_PEDIDO',
   CANCELADO = 'CANCELADO'
 }
 
