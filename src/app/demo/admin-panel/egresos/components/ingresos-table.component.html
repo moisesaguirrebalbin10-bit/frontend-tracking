@@ -1,0 +1,53 @@
+<div class="table-responsive">
+  <table class="table table-striped">
+    <thead>
+      <tr>
+        <th>Boleta Bsale</th>
+        <th>Fecha</th>
+        <th>Precio</th>
+        <th>Tienda/Vendedor</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr *ngIf="loading && paginatedIngresos.length === 0">
+        <td colspan="4" class="text-center py-4">
+          <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+          Cargando ingresos...
+        </td>
+      </tr>
+      <tr *ngFor="let ingreso of paginatedIngresos; trackBy: trackByIngreso">
+        <td>{{ ingreso.boleta }}</td>
+        <td>{{ ingreso.fecha | date:'short' }}</td>
+        <td>{{ ingreso.precio | currency:'PEN':'symbol' }}</td>
+        <td>{{ ingreso.tienda }}<span *ngIf="ingreso.vendedor"> / {{ ingreso.vendedor }}</span></td>
+      </tr>
+      <tr *ngIf="!loading && paginatedIngresos.length === 0">
+        <td colspan="4" class="text-center py-4">No hay ingresos para este filtro.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="pagination-bar" *ngIf="ingresos.length > 0">
+  <small class="text-muted">
+    Mostrando {{ visibleStart }}-{{ visibleEnd }} de {{ ingresos.length }} ingresos
+  </small>
+
+  <div class="btn-group btn-group-sm" role="group" aria-label="Paginacion de ingresos">
+    <button class="btn btn-outline-secondary" (click)="goToPage(1)" [disabled]="currentPage === 1">
+      &lt;&lt;
+    </button>
+    <button class="btn btn-outline-secondary" (click)="goToPage(currentPage - 1)" [disabled]="currentPage === 1">
+      &lt;
+    </button>
+    <button class="btn btn-outline-secondary active" type="button">
+      {{ currentPage }} / {{ totalPages }}
+    </button>
+    <button class="btn btn-outline-secondary" (click)="goToPage(currentPage + 1)" [disabled]="currentPage === totalPages">
+      &gt;
+    </button>
+    <button class="btn btn-outline-secondary" (click)="goToPage(totalPages)" [disabled]="currentPage === totalPages">
+      &gt;&gt;
+    </button>
+  </div>
+</div>

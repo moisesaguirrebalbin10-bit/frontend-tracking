@@ -5,7 +5,7 @@ import { map, switchMap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { Order, OrderStatus, OrderTimeline, OrderLog } from '../models/order.model';
 import { WooCommerceService, WooCommerceOrder, WooCommerceOrdersFilters, WooCommerceOrdersResponse } from './woocommerce.service';
-import { BsaleService, BsaleOrder, BsaleOrdersResponse, BsalePaginationState } from './bsale.service';
+import { BsaleService, BsaleOrder, BsaleOrdersFilters, BsaleOrdersResponse, BsalePaginationState } from './bsale.service';
 
 export interface OrdersResponse {
   data: Order[];
@@ -274,8 +274,8 @@ export class OrderService {
    * ---------INICIO BSALE ---------
    * Trae la primera página de Bsale (más recientes).
    */
-  getBsaleOrdersFirstPage(): Observable<BsaleOrdersPageResult> {
-    return this.bsaleService.getFirstPage().pipe(
+  getBsaleOrdersFirstPage(limit?: number, filters?: BsaleOrdersFilters): Observable<BsaleOrdersPageResult> {
+    return this.bsaleService.getFirstPage(limit, filters).pipe(
       map(({ response, pagination }) => ({
         orders: this.transformBsaleResponse(response),
         pagination
@@ -287,12 +287,18 @@ export class OrderService {
    * @param page 
    * @param total
    */
-  getBsaleOrdersPage(page: number, total: number): Observable<BsaleOrdersPageResult> {
-    return this.bsaleService.getPage(page, total).pipe(
+  getBsaleOrdersPage(page: number, total: number, limit?: number, filters?: BsaleOrdersFilters): Observable<BsaleOrdersPageResult> {
+    return this.bsaleService.getPage(page, total, limit, filters).pipe(
       map(({ response, pagination }) => ({
         orders: this.transformBsaleResponse(response),
         pagination
       }))
+    );
+  }
+
+  getBsaleOrdersChunk(offset: number, limit: number): Observable<Order[]> {
+    return this.bsaleService.getChunk(offset, limit).pipe(
+      map(({ response }) => this.transformBsaleResponse(response))
     );
   }
   /**

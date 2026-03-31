@@ -1,0 +1,21 @@
+table {
+  width: 100%;
+}
+
+th, td {
+  text-align: left;
+  vertical-align: middle;
+}
+
+button {
+  min-width: 70px;
+}
+
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}

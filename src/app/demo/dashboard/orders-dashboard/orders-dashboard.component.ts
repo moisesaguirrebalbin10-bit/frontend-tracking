@@ -319,8 +319,7 @@ export class OrdersDashboardComponent implements OnInit {
     } else {
       result = order.created_at;
     }
-    // Log temporal para depuración
-    console.log('Pedido:', order.id, 'source:', order.source, 'store_slug:', order.store_slug, 'meta:', meta, 'date_created:', meta.date_created, 'created_at:', order.created_at, 'usado:', result);
+    
     // Formatear a dd/MM/yy HH:mm si es posible
     if (!result) return '-';
     let d = result.replace('T', ' ').replace(/-/g, '/');

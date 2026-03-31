@@ -48,6 +48,11 @@ const routes: Routes = [
         path: 'admin/tracking-analytics',
         canActivate: [AdminGuard],
         loadComponent: () => import('./demo/dashboard/tracking-analytics/tracking-analytics.component').then((c) => c.TrackingAnalyticsComponent)
+      },
+      {
+        path: 'admin/contabilidad',
+        canActivate: [AdminGuard],
+        loadComponent: () => import('./demo/admin-panel/egresos/contabilidad.component').then((c) => c.ContabilidadComponent)
       }
     ]
   },

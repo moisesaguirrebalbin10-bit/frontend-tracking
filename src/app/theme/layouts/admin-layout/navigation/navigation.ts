@@ -80,6 +80,15 @@ export const NavigationItems: NavigationItem[] = [
         url: '/admin/tracking-analytics',
         icon: 'bar-chart',
         breadcrumbs: false
+      },
+      {
+        id: 'admin-contabilidad',
+        title: 'Contabilidad',
+        type: 'item',
+        classes: 'nav-item',
+        url: '/admin/contabilidad',
+        icon: 'credit-card',
+        breadcrumbs: false
       }
     ]
   },

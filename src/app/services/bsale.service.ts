@@ -57,6 +57,12 @@ export interface BsalePaginationState {
   currentOffset: number;       
 }
 
+export interface BsaleOrdersFilters {
+  period?: 'day' | 'week' | 'month';
+  dateFrom?: string;
+  dateTo?: string;
+}
+
 // ────────────────────────────────────────────────
 // Servicio
 // ────────────────────────────────────────────────
@@ -76,17 +82,20 @@ export class BsaleService {
   /**
    * Calcula el offset inverso para traer los registros más nuevos primero.
    */
-  private calcOffset(totalRegistros: number, page: number): number {
-    return Math.max(0, totalRegistros - this.limit * page);
+  private calcOffset(totalRegistros: number, page: number, limit: number): number {
+    return Math.max(0, totalRegistros - limit * page);
   }
 
   /**
    * Trae la primera página y guarda el total para paginación posterior.
    * Siempre usa page = 1 internamente para la primera carga.
    */
-  getFirstPage(): Observable<{ response: BsaleOrdersResponse; pagination: BsalePaginationState }> {
+  getFirstPage(
+    limit: number = this.limit,
+    filters?: BsaleOrdersFilters
+  ): Observable<{ response: BsaleOrdersResponse; pagination: BsalePaginationState }> {
     // Primero pedimos con offset=0 y limit=1 para conocer el total
-    return this.getPage(1).pipe(
+    return this.getPage(1, undefined, limit, filters).pipe(
       map(result => {
         this.cachedTotal = result.response.total_registros;
         return result;
@@ -101,23 +110,25 @@ export class BsaleService {
    */
   getPage(
     page: number,
-    total?: number
+    total?: number,
+    limit: number = this.limit,
+    filters?: BsaleOrdersFilters
   ): Observable<{ response: BsaleOrdersResponse; pagination: BsalePaginationState }> {
     const totalRegistros = total ?? this.cachedTotal;
 
     
     // backend nos devuelve `total_registros`. Luego calculamos el offset.
     if (totalRegistros === 0 && page === 1) {
-      return this.fetchRaw(0, this.limit).pipe(
+      return this.fetchRaw(0, limit, filters).pipe(
         map(response => {
           this.cachedTotal = response.total_registros;
-          const offset = this.calcOffset(response.total_registros, 1);
+          const offset = this.calcOffset(response.total_registros, 1, limit);
           
           const pagination: BsalePaginationState = {
             totalRegistros: response.total_registros,
             currentPage: 1,
-            limit: this.limit,
-            currentOffset: 0
+            limit,
+            currentOffset: offset
           };
           return { response, pagination };
         })
@@ -125,16 +136,16 @@ export class BsaleService {
     }
 
     
-    const offsetParam = (page - 1) * this.limit;
-    const estimatedRealOffset = this.calcOffset(totalRegistros, page);
+    const offsetParam = (page - 1) * limit;
+    const estimatedRealOffset = this.calcOffset(totalRegistros, page, limit);
 
-    return this.fetchRaw(offsetParam, this.limit).pipe(
+    return this.fetchRaw(offsetParam, limit, filters).pipe(
       map(response => {
         this.cachedTotal = response.total_registros;
         const pagination: BsalePaginationState = {
           totalRegistros: response.total_registros,
           currentPage: page,
-          limit: this.limit,
+          limit,
           currentOffset: estimatedRealOffset
         };
         return { response, pagination };
@@ -142,15 +153,39 @@ export class BsaleService {
     );
   }
 
-  /** Número total de páginas dado el total de registros */
-  getTotalPages(totalRegistros: number): number {
-    return Math.ceil(totalRegistros / this.limit);
+  getChunk(offset: number, limit: number, filters?: BsaleOrdersFilters): Observable<{ response: BsaleOrdersResponse; pagination: BsalePaginationState }> {
+    return this.fetchRaw(offset, limit, filters).pipe(
+      map((response) => ({
+        response,
+        pagination: {
+          totalRegistros: response.total_registros,
+          currentPage: Math.floor(offset / Math.max(limit, 1)) + 1,
+          limit,
+          currentOffset: offset
+        }
+      }))
+    );
   }
 
-  private fetchRaw(offset: number, limit: number): Observable<BsaleOrdersResponse> {
-    const params = new HttpParams()
+  /** Número total de páginas dado el total de registros */
+  getTotalPages(totalRegistros: number, limit: number = this.limit): number {
+    return Math.ceil(totalRegistros / limit);
+  }
+
+  private fetchRaw(offset: number, limit: number, filters?: BsaleOrdersFilters): Observable<BsaleOrdersResponse> {
+    let params = new HttpParams()
       .set('offset', offset.toString())
       .set('limit', limit.toString());
+
+    if (filters?.period) {
+      params = params.set('period', filters.period);
+    }
+    if (filters?.dateFrom) {
+      params = params.set('date_from', filters.dateFrom);
+    }
+    if (filters?.dateTo) {
+      params = params.set('date_to', filters.dateTo);
+    }
 
     return this.http
       .get<BsaleOrdersResponse>(`${this.apiUrl}/bsale/orders`, { 

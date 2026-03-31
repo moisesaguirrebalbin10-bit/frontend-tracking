@@ -1,0 +1,62 @@
+<div class="table-responsive">
+  <table class="table table-striped">
+    <thead>
+      <tr>
+        <th>Nombre</th>
+        <th>Descripcion</th>
+        <th>Metodo/Banco</th>
+        <th>Categoria</th>
+        <th>Precio</th>
+        <th>Fecha</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr *ngIf="loading && paginatedEgresos.length === 0">
+        <td colspan="7" class="text-center py-4">
+          <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+          Cargando egresos...
+        </td>
+      </tr>
+      <tr *ngFor="let egreso of paginatedEgresos; trackBy: trackByEgreso">
+        <td>{{ egreso.nombre }}</td>
+        <td>{{ egreso.descripcion }}</td>
+        <td>{{ egreso.banco_metodo }}</td>
+        <td>{{ egreso.categoria }}</td>
+        <td>{{ egreso.precio | currency:'PEN':'symbol' }}</td>
+        <td>{{ egreso.fecha | date:'shortDate' }}</td>
+        <td>
+          <button class="btn btn-sm btn-primary" (click)="onEdit(egreso)">Editar</button>
+          <button class="btn btn-sm btn-info ms-1" (click)="onViewLogs(egreso)">Historial</button>
+        </td>
+      </tr>
+      <tr *ngIf="!loading && paginatedEgresos.length === 0">
+        <td colspan="7" class="text-center py-4">No hay egresos para este filtro.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="pagination-bar" *ngIf="egresos.length > 0">
+  <small class="text-muted">
+    Mostrando {{ visibleStart }}-{{ visibleEnd }} de {{ egresos.length }} egresos
+  </small>
+
+  <div class="btn-group btn-group-sm" role="group" aria-label="Paginacion de egresos">
+    <button class="btn btn-outline-secondary" (click)="goToPage(1)" [disabled]="currentPage === 1">
+      &lt;&lt;
+    </button>
+    <button class="btn btn-outline-secondary" (click)="goToPage(currentPage - 1)" [disabled]="currentPage === 1">
+      &lt;
+    </button>
+    <button class="btn btn-outline-secondary active" type="button">
+      {{ currentPage }} / {{ totalPages }}
+    </button>
+    <button class="btn btn-outline-secondary" (click)="goToPage(currentPage + 1)" [disabled]="currentPage === totalPages">
+      &gt;
+    </button>
+    <button class="btn btn-outline-secondary" (click)="goToPage(totalPages)" [disabled]="currentPage === totalPages">
+      &gt;&gt;
+    </button>
+  </div>
+</div>
