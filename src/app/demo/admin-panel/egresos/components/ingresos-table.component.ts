@@ -1,4 +1,4 @@
-import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 export interface IngresoPedido {
@@ -17,30 +17,24 @@ export interface IngresoPedido {
   standalone: true,
   imports: [CommonModule]
 })
-export class IngresosTableComponent implements OnChanges {
+export class IngresosTableComponent {
   @Input() ingresos: IngresoPedido[] = [];
   @Input() loading = false;
+  @Input() currentPage = 1;
+  @Input() pageSize = 20;
+  @Input() totalItems = 0;
+  @Output() pageChange = new EventEmitter<number>();
 
-  readonly pageSize = 50;
-  currentPage = 1;
-
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['ingresos']) {
-      this.currentPage = 1;
-    }
-  }
-
-  get paginatedIngresos(): IngresoPedido[] {
-    const start = (this.currentPage - 1) * this.pageSize;
-    return this.ingresos.slice(start, start + this.pageSize);
+  get visibleIngresos(): IngresoPedido[] {
+    return this.ingresos;
   }
 
   get totalPages(): number {
-    return Math.max(1, Math.ceil(this.ingresos.length / this.pageSize));
+    return Math.max(1, Math.ceil(this.totalItems / this.pageSize));
   }
 
   get visibleStart(): number {
-    if (this.ingresos.length === 0) {
+    if (this.totalItems === 0) {
       return 0;
     }
 
@@ -48,7 +42,7 @@ export class IngresosTableComponent implements OnChanges {
   }
 
   get visibleEnd(): number {
-    return Math.min(this.currentPage * this.pageSize, this.ingresos.length);
+    return Math.min(this.currentPage * this.pageSize, this.totalItems);
   }
 
   goToPage(page: number) {
@@ -56,7 +50,7 @@ export class IngresosTableComponent implements OnChanges {
       return;
     }
 
-    this.currentPage = page;
+    this.pageChange.emit(page);
   }
 
   trackByIngreso(_: number, ingreso: IngresoPedido) {

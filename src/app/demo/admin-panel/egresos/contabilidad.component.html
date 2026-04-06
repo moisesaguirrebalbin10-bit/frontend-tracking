@@ -6,8 +6,8 @@
     <button class="btn btn-outline-primary me-2" [class.active]="filtro==='mes'" (click)="setFiltro('mes')">Por Mes</button>
     <button class="btn btn-outline-primary me-2" [class.active]="filtro==='rango'" (click)="setFiltro('rango')">Por Rango</button>
     <span *ngIf="filtro==='rango'">
-      <input type="date" [(ngModel)]="fechaInicio" class="form-control d-inline-block w-auto mx-1" />
-      <input type="date" [(ngModel)]="fechaFin" class="form-control d-inline-block w-auto mx-1" />
+      <input type="date" [(ngModel)]="fechaInicio" (change)="onDateRangeChanged()" class="form-control d-inline-block w-auto mx-1" />
+      <input type="date" [(ngModel)]="fechaFin" (change)="onDateRangeChanged()" class="form-control d-inline-block w-auto mx-1" />
     </span>
   </div>
   <div class="mb-4">
@@ -30,7 +30,14 @@
     </div>
   </div>
   <div class="mb-4">
-    <app-ingresos-table [ingresos]="ingresos" [loading]="cargandoIngresos"></app-ingresos-table>
+    <app-ingresos-table
+      [ingresos]="ingresos"
+      [loading]="cargandoIngresos"
+      [currentPage]="ingresosPage"
+      [pageSize]="ingresosPageSize"
+      [totalItems]="ingresosTotalItems"
+      (pageChange)="onIngresosPageChange($event)">
+    </app-ingresos-table>
   </div>
   <button class="btn btn-success mb-3" (click)="onAdd()">Agregar Egreso</button>
   <ng-container *ngIf="showForm; else tablaEgresos">

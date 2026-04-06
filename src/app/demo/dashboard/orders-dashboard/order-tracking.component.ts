@@ -1,6 +1,7 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { DashboardOrderAllowedTransition } from '../../../models/dashboard-order.model';
 
 @Component({
   selector: 'app-order-tracking',
@@ -10,13 +11,13 @@ import { FormsModule } from '@angular/forms';
     <div class="tracking-timeline">
       <div class="tracking-step" 
         *ngFor="let step of trackingSteps"
-        [ngClass]="{ 'completed': isCompleted(step), 'active': isActive(step), 'error': step === 'ERROR', 'clickable': canEdit, 'disabled': !canEdit }"
+        [ngClass]="{ 'completed': isCompleted(step), 'active': isActive(step), 'error': step === 'ERROR', 'clickable': canEditStep(step), 'disabled': !canEditStep(step) }"
         (click)="selectStatus(step)">
         <div class="tracking-circle">
           <i [ngClass]="getIcon(step)"></i>
           <div class="status-actions" *ngIf="selectedEditStatus === step">
             <button type="button" class="btn-action btn-success" (click)="confirmStatus(step, $event)" title="Completado">✓</button>
-            <button type="button" class="btn-action btn-danger" (click)="markAsError(step, $event)" title="Error">✕</button>
+            <button type="button" class="btn-action btn-danger" *ngIf="canRegisterError()" (click)="markAsError(step, $event)" title="Error">✕</button>
           </div>
         </div>
         <div class="tracking-label">{{ getLabel(step) }}</div>
@@ -270,6 +271,7 @@ export class OrderTrackingComponent {
   @Input() currentStatus!: string;
   @Input() errorReason?: string;
   @Input() canEdit = true;
+  @Input() allowedTransitions: DashboardOrderAllowedTransition[] = [];
   @Output() statusSelected = new EventEmitter<{ status: string; confirmed: boolean; errorReason?: string; evidenceImage?: File }>();
 
   trackingSteps: string[] = [
@@ -288,7 +290,7 @@ export class OrderTrackingComponent {
   formErrorReason = '';
 
   selectStatus(step: string) {
-    if (!this.canEdit) return;
+    if (!this.canEdit || !this.canEditStep(step)) return;
     this.selectedEditStatus = this.selectedEditStatus === step ? null : step;
   }
 
@@ -307,6 +309,9 @@ export class OrderTrackingComponent {
   }
 
   markAsError(status: string, event: Event) {
+    if (!this.canRegisterError()) {
+      return;
+    }
     event.stopPropagation();
     this.showErrorForm = true;
     this.selectedEditStatus = status;
@@ -319,7 +324,7 @@ export class OrderTrackingComponent {
     if (!this.formErrorReason.trim()) return;
 
     this.statusSelected.emit({ 
-      status: 'ERROR', 
+      status: 'ERROR_EN_PEDIDO', 
       confirmed: true, 
       errorReason: this.formErrorReason,
       evidenceImage: this.selectedImageFile || undefined
@@ -409,6 +414,22 @@ export class OrderTrackingComponent {
       'CANCELADO': 'flaticon-x'
     };
     return icons[step];
+  }
+
+  canEditStep(step: string): boolean {
+    if (!this.canEdit) {
+      return false;
+    }
+
+    if (!this.allowedTransitions.length) {
+      return true;
+    }
+
+    return this.allowedTransitions.some((transition) => transition.value.toUpperCase() === step.toUpperCase());
+  }
+
+  canRegisterError(): boolean {
+    return this.allowedTransitions.some((transition) => transition.value === 'error_en_pedido');
   }
 }
 

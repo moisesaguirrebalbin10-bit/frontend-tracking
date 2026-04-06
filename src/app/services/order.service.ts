@@ -79,21 +79,24 @@ export class OrderService {
   updateOrderStatus(
     id: number,
     status: OrderStatus,
-    options?: { errorReason?: string; evidenceImage?: File }
+    options?: { errorReason?: string; evidenceImage?: File; deliveryUserId?: number }
   ): Observable<Order> {
     // Convert status to lowercase with underscores: EN_PROCESO → en_proceso
     const statusValue = status.toLowerCase();
     const errorReason = options?.errorReason;
     const evidenceImage = options?.evidenceImage;
+    const deliveryUserId = options?.deliveryUserId;
 
     const body: any = { status: statusValue };
     if (errorReason) body.error_reason = errorReason;
+    if (deliveryUserId) body.delivery_user_id = deliveryUserId;
 
     // Only use FormData if there's an image to upload
     if (evidenceImage) {
       const formData = new FormData();
       formData.append('status', statusValue);
       if (errorReason) formData.append('error_reason', errorReason);
+      if (deliveryUserId) formData.append('delivery_user_id', String(deliveryUserId));
 
       // Keep compatibility with backend aliases for evidence uploads.
       if (status === OrderStatus.ENTREGADO) {

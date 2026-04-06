@@ -5,8 +5,8 @@ import { ApexOptions, NgApexchartsModule } from 'ng-apexcharts';
 import { forkJoin, Observable, of } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
 import * as XLSX from 'xlsx';
-import { Order, OrderStatus } from '../../../models/order.model';
-import { OrderService } from '../../../services/order.service';
+import { DashboardOrderRow, DashboardOrderSource, DashboardOrdersQuery, DashboardOrdersResponse } from '../../../models/dashboard-order.model';
+import { DashboardOrdersService } from '../../../services/dashboard-orders.service';
 
 interface StoreFilterOption {
   slug: string;
@@ -26,9 +26,7 @@ interface AnalyticsRow {
 }
 
 type Timeframe = 'day' | 'week' | 'month' | 'range';
-type DataSource = 'all' | 'internal' | 'woocommerce' | 'bsale';
 type GroupMode = 'period' | 'store';
-
 
 @Component({
   selector: 'app-tracking-analytics',
@@ -39,27 +37,15 @@ type GroupMode = 'period' | 'store';
 })
 export class TrackingAnalyticsComponent implements OnInit {
   timeframe = signal<Timeframe>('month');
-  dataSource = signal<DataSource>('all');
+  dataSource = signal<DashboardOrderSource>('all');
   groupMode = signal<GroupMode>('period');
-  dateFrom = signal<string>('');
-  dateTo = signal<string>('');
-
-  //Bsale Total de páginas disponibles
-   bsaleTotalPages = signal<number>(0);
-   //PAGINA DE RANGO INCIAL 
-   bsaleRangeFrom = signal<number>(1);
-   //PAGINA DE RANGO FINAL
-     bsaleRangeTo = signal<number>(1);
-     //INPUT DE PÁGINA PARA CARGAR TEMPORAL
-     bsaleInputFrom = signal<number>(1);
-  bsaleInputTo = signal<number>(1);
-  //INDICADOR DE CARGA DE BOLETAS BSALE
-    bsaleLoading = signal<boolean>(false);
-
+  dateFrom = signal('');
+  dateTo = signal('');
 
   loading = signal(false);
-  allOrders = signal<Order[]>([]);
-  filteredOrders = signal<Order[]>([]);
+  loadError = signal('');
+  allOrders = signal<DashboardOrderRow[]>([]);
+  filteredOrders = signal<DashboardOrderRow[]>([]);
   availableStores = signal<StoreFilterOption[]>([]);
   selectedStoreSlugs = signal<string[]>([]);
   analyticsRows = signal<AnalyticsRow[]>([]);
@@ -70,12 +56,10 @@ export class TrackingAnalyticsComponent implements OnInit {
   cancelledOrders = signal(0);
   trackedOrders = signal(0);
 
-  readonly itemsPerPage = 100;
-
   mainChartOptions: Partial<ApexOptions> = {};
   statusChartOptions: Partial<ApexOptions> = {};
 
-  constructor(private orderService: OrderService) {
+  constructor(private readonly dashboardOrdersService: DashboardOrdersService) {
     this.resetCharts();
   }
 
@@ -85,120 +69,33 @@ export class TrackingAnalyticsComponent implements OnInit {
 
   loadOrders(): void {
     this.loading.set(true);
- 
-    forkJoin({
-      internal: this.fetchAllInternalOrders(),
-      bsale: this.fetchBsaleOrdersForRange()
-    }).subscribe({
-      next: ({ internal, bsale }) => {
-        const combined = [...internal, ...bsale].sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-        this.allOrders.set(combined);
-        this.refreshAvailableStores(combined);
+    this.loadError.set('');
+    this.fetchAllRows().subscribe({
+      next: (orders) => {
+        this.allOrders.set(orders);
+        this.refreshAvailableStores(orders);
         this.rebuildAnalytics();
         this.loading.set(false);
-        this.bsaleLoading.set(false);
       },
-      error: (error) => {
-        console.error('Error loading tracking analytics orders', error);
+      error: () => {
         this.allOrders.set([]);
         this.refreshAvailableStores([]);
         this.rebuildAnalytics();
+        this.loadError.set('No se pudo cargar la analitica de tracking.');
         this.loading.set(false);
-        this.bsaleLoading.set(false);
       }
     });
-  }
-
-  //ACCIONES DE RANGO BSALE
-  applyBsaleRange(): void {
-    const total = this.bsaleTotalPages();
-    let from = Math.max(1, Math.min(this.bsaleInputFrom(), total || 1));
-    let to   = Math.max(from, Math.min(this.bsaleInputTo(), total || 1));
- 
-    this.bsaleRangeFrom.set(from);
-    this.bsaleRangeTo.set(to);
-    this.bsaleInputFrom.set(from);
-    this.bsaleInputTo.set(to);
- 
-    this.reloadBsaleOrders();
-  }
- 
-  prevBsaleRange(): void {
-    const span = this.bsaleRangeTo() - this.bsaleRangeFrom() + 1;
-    const newFrom = Math.max(1, this.bsaleRangeFrom() - span);
-    const newTo   = newFrom + span - 1;
-    this.bsaleRangeFrom.set(newFrom);
-    this.bsaleRangeTo.set(newTo);
-    this.bsaleInputFrom.set(newFrom);
-    this.bsaleInputTo.set(newTo);
-    this.reloadBsaleOrders();
-  }
- 
-  nextBsaleRange(): void {
-    const total = this.bsaleTotalPages();
-    const span  = this.bsaleRangeTo() - this.bsaleRangeFrom() + 1;
-    const newFrom = Math.min(total, this.bsaleRangeTo() + 1);
-    const newTo   = Math.min(total, newFrom + span - 1);
-    this.bsaleRangeFrom.set(newFrom);
-    this.bsaleRangeTo.set(newTo);
-    this.bsaleInputFrom.set(newFrom);
-    this.bsaleInputTo.set(newTo);
-    this.reloadBsaleOrders();
-  }
-
-  //RECARGA PEDIDOS DE BSALE SEGUN RANGO
-   private reloadBsaleOrders(): void {
-    this.bsaleLoading.set(true);
-    this.fetchBsaleOrdersForRange().subscribe({
-      next: (bsaleOrders) => {
-        // Conserva los pedidos no-bsale y agrega los nuevos de bsale
-        const nonBsale = this.allOrders().filter(o => o.source !== 'bsale');
-        const combined = [...nonBsale, ...bsaleOrders].sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-        this.allOrders.set(combined);
-        this.refreshAvailableStores(combined);
-        this.rebuildAnalytics();
-        this.bsaleLoading.set(false);
-      },
-      error: () => {
-        this.bsaleLoading.set(false);
-      }
-    });
-  }
- 
-  get canGoPrevBsale(): boolean {
-    return this.bsaleRangeFrom() > 1;
-  }
- 
-  get canGoNextBsale(): boolean {
-    return this.bsaleRangeTo() < this.bsaleTotalPages();
-  }
- 
-  get showBsaleControls(): boolean {
-    return this.dataSource() === 'bsale' || this.dataSource() === 'all';
-  }
- 
-  get bsaleRangeSummary(): string {
-    const total = this.bsaleTotalPages();
-    if (!total) return 'Cargando paginación Bsale…';
-    const from = this.bsaleRangeFrom();
-    const to   = this.bsaleRangeTo();
-    const records = (to - from + 1) * 50;
-    return `Mostrando páginas ${from}–${to} de ${total} (~${records} registros)`;
   }
 
   setTimeframe(timeframe: Timeframe): void {
     this.timeframe.set(timeframe);
-    this.rebuildAnalytics();
+    this.loadOrders();
   }
 
-  setDataSource(source: DataSource): void {
+  setDataSource(source: DashboardOrderSource): void {
     this.dataSource.set(source);
     this.selectedStoreSlugs.set([]);
-    this.rebuildAnalytics();
+    this.loadOrders();
   }
 
   setGroupMode(mode: GroupMode): void {
@@ -209,26 +106,24 @@ export class TrackingAnalyticsComponent implements OnInit {
   onDateFromChange(event: Event): void {
     const input = event.target as HTMLInputElement | null;
     this.dateFrom.set(input?.value || '');
-    this.rebuildAnalytics();
+    this.loadOrders();
   }
 
   onDateToChange(event: Event): void {
     const input = event.target as HTMLInputElement | null;
     this.dateTo.set(input?.value || '');
-    this.rebuildAnalytics();
+    this.loadOrders();
   }
 
   clearDateRange(): void {
     this.dateFrom.set('');
     this.dateTo.set('');
-    this.rebuildAnalytics();
+    this.loadOrders();
   }
 
   toggleStore(slug: string): void {
     const current = this.selectedStoreSlugs();
-    this.selectedStoreSlugs.set(
-      current.includes(slug) ? current.filter((value) => value !== slug) : [...current, slug]
-    );
+    this.selectedStoreSlugs.set(current.includes(slug) ? current.filter((value) => value !== slug) : [...current, slug]);
     this.rebuildAnalytics();
   }
 
@@ -240,7 +135,6 @@ export class TrackingAnalyticsComponent implements OnInit {
   isStoreSelected(slug: string): boolean {
     return this.selectedStoreSlugs().includes(slug);
   }
-
 
   exportCurrentView(): void {
     const summaryRows = this.analyticsRows().map((row) => ({
@@ -254,44 +148,28 @@ export class TrackingAnalyticsComponent implements OnInit {
       Cancelados: row.cancelledCount
     }));
 
-    const detailRows = this.filteredOrders().map((order) => {
-      const isBsale = order.source === 'bsale';
-      const base: Record<string, any> = {
-        Grupo: this.groupMode() === 'store' ? this.getStoreBucket(order).label : this.getPeriodBucket(order).label,
-        Nro_Boleta: order.external_id || order.id,
-        Cliente: order.customer_name || 'Sin nombre',
-        Productos: this.getOrderItemsSummary(order),
-        Total_Pedido: this.getOrderTotal(order),
-        Tienda: this.getOrderStoreLabel(order),
-        Estado: this.getOrderStatusLabel(order),
-        Fecha_Creacion: this.getOrderCreatedAtLabel(order)
-      };
- 
-      // Columnas de Bsale
-      if (isBsale) {
-        base['Vendedor'] = order.bsale_vendedor || '';
-        base['Fecha_Despacho'] = order.bsale_fecha_despacho || '';
-        base['Marca_Red_Social'] = order.bsale_marca_red_social || '';
-        base['Estado_Pedido_Bsale'] = order.bsale_estado_pedido || '';
-        base['Metodo_Pago'] = order.bsale_pago_metodos || '';
-      }
- 
-      return base;
-    });
+    const detailRows = this.filteredOrders().map((order) => ({
+      Grupo: this.groupMode() === 'store' ? this.getStoreBucket(order).label : this.getPeriodBucket(order.ordered_at).label,
+      Numero_Pedido: order.order_number || '-',
+      Boleta_Bsale: order.bsale_receipt || '-',
+      Cliente: order.customer_name || 'No registrado',
+      Total: order.total || 0,
+      Estado: order.status.label,
+      Fuente: order.source,
+      Tienda_Vendedor: order.vendor_name || order.store_slug || '-',
+      Fecha: order.ordered_at || ''
+    }));
 
-    
     if (!summaryRows.length && !detailRows.length) {
       return;
     }
 
     const workbook = XLSX.utils.book_new();
     if (summaryRows.length) {
-      const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
-      XLSX.utils.book_append_sheet(workbook, summarySheet, 'Resumen');
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'Resumen');
     }
     if (detailRows.length) {
-      const detailSheet = XLSX.utils.json_to_sheet(detailRows);
-      XLSX.utils.book_append_sheet(workbook, detailSheet, 'Detalle Pedidos');
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(detailRows), 'Detalle');
     }
 
     const fileName = `tracking-analytics-${this.groupMode()}-${this.timeframe()}-${new Date().toISOString().slice(0, 10)}.xlsx`;
@@ -309,7 +187,7 @@ export class TrackingAnalyticsComponent implements OnInit {
 
   get dateRangeSummary(): string {
     if (this.timeframe() !== 'range') {
-      return 'Filtra por dia, semana, mes o rango libre.';
+      return 'Los filtros de origen y periodo se resuelven server-side contra la BD local.';
     }
     if (this.dateFrom() && this.dateTo()) {
       return `Rango activo: ${this.dateFrom()} a ${this.dateTo()}`;
@@ -328,37 +206,119 @@ export class TrackingAnalyticsComponent implements OnInit {
   }
 
   get groupColumnLabel(): string {
-    return this.groupMode() === 'store' ? 'Tienda' : 'Periodo';
+    return this.groupMode() === 'store' ? 'Tienda / Vendedor' : 'Periodo';
+  }
+
+  private fetchAllRows(): Observable<DashboardOrderRow[]> {
+    const perPage = 100;
+    return this.dashboardOrdersService.fetchDashboardOrders({
+      ...this.buildQuery(),
+      page: 1,
+      per_page: perPage
+    }).pipe(
+      switchMap((firstPage) => {
+        if ((firstPage.last_page || 1) <= 1) {
+          return of(firstPage.data || []);
+        }
+
+        const requests = Array.from({ length: firstPage.last_page - 1 }, (_, index) =>
+          this.dashboardOrdersService.fetchDashboardOrders({
+            ...this.buildQuery(),
+            page: index + 2,
+            per_page: perPage
+          }).pipe(
+            catchError(() => of(this.emptyPage(index + 2, firstPage.last_page, firstPage.total, perPage)))
+          )
+        );
+
+        return forkJoin(requests).pipe(
+          map((remaining) => [firstPage, ...remaining].flatMap((page) => page.data || []))
+        );
+      }),
+      catchError(() => of([]))
+    );
+  }
+
+  private emptyPage(page: number, lastPage: number, total: number, perPage: number): DashboardOrdersResponse {
+    return {
+      current_page: page,
+      data: [],
+      from: null,
+      last_page: lastPage,
+      per_page: perPage,
+      to: null,
+      total
+    };
+  }
+
+  private buildQuery(): Omit<DashboardOrdersQuery, 'page' | 'per_page'> {
+    const bounds = this.getPeriodBounds();
+    return {
+      source: this.dataSource(),
+      period: this.timeframe(),
+      date_from: bounds.dateFrom,
+      date_to: bounds.dateTo
+    };
+  }
+
+  private getPeriodBounds(): { dateFrom?: string; dateTo?: string } {
+    const today = new Date();
+    const timeframe = this.timeframe();
+
+    if (timeframe === 'range') {
+      return {
+        dateFrom: this.dateFrom() || undefined,
+        dateTo: this.dateTo() || undefined
+      };
+    }
+
+    if (timeframe === 'day') {
+      const value = this.toLocalDateString(today);
+      return { dateFrom: value, dateTo: value };
+    }
+
+    if (timeframe === 'week') {
+      const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      start.setDate(start.getDate() - 6);
+      return {
+        dateFrom: this.toLocalDateString(start),
+        dateTo: this.toLocalDateString(today)
+      };
+    }
+
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    return {
+      dateFrom: this.toLocalDateString(start),
+      dateTo: this.toLocalDateString(today)
+    };
+  }
+
+  private toLocalDateString(value: Date): string {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   private rebuildAnalytics(): void {
-    const filtered = this.getFilteredOrders();
+    const filtered = this.allOrders().filter((order) => this.matchesStoreFilter(order));
     this.filteredOrders.set(filtered);
-
     this.trackedOrders.set(filtered.length);
-    this.gainAmount.set(this.sumBy(filtered, (order) => (this.isGainStatus(order) ? this.getOrderTotal(order) : 0)));
-    this.lossAmount.set(this.sumBy(filtered, (order) => (this.isLossStatus(order) ? this.getOrderTotal(order) : 0)));
+    this.gainAmount.set(this.sumBy(filtered, (order) => (this.isGainStatus(order) ? order.total : 0)));
+    this.lossAmount.set(this.sumBy(filtered, (order) => (this.isLossStatus(order) ? order.total : 0)));
     this.failedOrders.set(filtered.filter((order) => this.isFailedStatus(order)).length);
-    this.cancelledOrders.set(filtered.filter((order) => this.normalizeStatus(order.status) === 'CANCELADO').length);
+    this.cancelledOrders.set(filtered.filter((order) => this.normalizeStatus(order.status.value) === 'cancelado').length);
 
     const rows = this.buildAnalyticsRows(filtered);
     this.analyticsRows.set(rows);
     this.updateCharts(rows, filtered);
   }
 
-  private getFilteredOrders(): Order[] {
-    const now = new Date();
-    return this.allOrders()
-      .filter((order) => this.matchesDataSource(order))
-      .filter((order) => this.matchesStoreFilter(order))
-      .filter((order) => this.isWithinSelectedTimeframe(order.created_at, now));
-  }
-
-  private buildAnalyticsRows(orders: Order[]): AnalyticsRow[] {
+  private buildAnalyticsRows(orders: DashboardOrderRow[]): AnalyticsRow[] {
     const rowsMap = new Map<string, AnalyticsRow>();
 
     for (const order of orders) {
-      const bucket = this.groupMode() === 'store' ? this.getStoreBucket(order) : this.getPeriodBucket(order);
+      const bucket = this.groupMode() === 'store' ? this.getStoreBucket(order) : this.getPeriodBucket(order.ordered_at);
       const existing = rowsMap.get(bucket.key) ?? {
         key: bucket.key,
         label: bucket.label,
@@ -373,44 +333,38 @@ export class TrackingAnalyticsComponent implements OnInit {
 
       existing.orders += 1;
       if (this.isGainStatus(order)) {
-        existing.gainAmount += this.getOrderTotal(order);
+        existing.gainAmount += order.total;
       }
       if (this.isLossStatus(order)) {
-        existing.lossAmount += this.getOrderTotal(order);
+        existing.lossAmount += order.total;
       }
       if (this.isInProgressStatus(order)) {
         existing.inProgressCount += 1;
       }
-      if (this.normalizeStatus(order.status) === 'ENTREGADO') {
+      if (this.normalizeStatus(order.status.value) === 'entregado') {
         existing.deliveredCount += 1;
       }
       if (this.isFailedStatus(order)) {
         existing.failedCount += 1;
       }
-      if (this.normalizeStatus(order.status) === 'CANCELADO') {
+      if (this.normalizeStatus(order.status.value) === 'cancelado') {
         existing.cancelledCount += 1;
       }
 
       rowsMap.set(bucket.key, existing);
     }
 
-    const rows = Array.from(rowsMap.values());
-    if (this.groupMode() === 'store') {
-      return rows.sort((a, b) => b.gainAmount - a.gainAmount || a.label.localeCompare(b.label));
-    }
-    return rows.sort((a, b) => a.key.localeCompare(b.key));
+    return Array.from(rowsMap.values()).sort((a, b) => a.label.localeCompare(b.label));
   }
 
-  private getStoreBucket(order: Order): { key: string; label: string } {
-    const slug = (order.store_slug || '').trim();
-    const label = slug || (this.getOrderSource(order) === 'woocommerce' ? 'WooCommerce sin tienda' : 'Interno');
+  private getStoreBucket(order: DashboardOrderRow): { key: string; label: string } {
+    const label = order.vendor_name || order.store_slug || (order.source === 'bsale' ? 'Bsale' : 'WooCommerce');
     return { key: label.toLowerCase(), label };
   }
 
-  private getPeriodBucket(order: Order): { key: string; label: string } {
-    const orderDate = new Date(order.created_at);
-    const time = orderDate.getTime();
-    if (Number.isNaN(time)) {
+  private getPeriodBucket(dateValue: string | null): { key: string; label: string } {
+    const orderDate = dateValue ? new Date(dateValue) : null;
+    if (!orderDate || Number.isNaN(orderDate.getTime())) {
       return { key: 'sin-fecha', label: 'Sin fecha' };
     }
 
@@ -427,8 +381,10 @@ export class TrackingAnalyticsComponent implements OnInit {
 
     if (this.timeframe() === 'month') {
       const week = this.getWeekOfMonth(orderDate);
-      const monthKey = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, '0')}-S${week}`;
-      return { key: monthKey, label: `Semana ${week}` };
+      return {
+        key: `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, '0')}-S${week}`,
+        label: `Semana ${week}`
+      };
     }
 
     const key = orderDate.toISOString().slice(0, 10);
@@ -436,7 +392,7 @@ export class TrackingAnalyticsComponent implements OnInit {
     return { key, label };
   }
 
-  private updateCharts(rows: AnalyticsRow[], orders: Order[]): void {
+  private updateCharts(rows: AnalyticsRow[], orders: DashboardOrderRow[]): void {
     const categories = rows.map((row) => row.label);
     this.mainChartOptions = {
       chart: {
@@ -463,14 +419,7 @@ export class TrackingAnalyticsComponent implements OnInit {
         width: 6,
         colors: ['transparent']
       },
-      xaxis: {
-        categories,
-        labels: {
-          style: {
-            colors: categories.map(() => '#9ca3af')
-          }
-        }
-      },
+      xaxis: { categories },
       yaxis: {
         labels: {
           formatter: (value) => `S/ ${Number(value || 0).toFixed(0)}`
@@ -478,24 +427,17 @@ export class TrackingAnalyticsComponent implements OnInit {
       },
       legend: {
         position: 'top',
-        horizontalAlign: 'left',
-        fontFamily: `'Inter', sans-serif`
+        horizontalAlign: 'left'
       },
       tooltip: {
-        theme: 'dark',
-        y: {
-          formatter: (value) => `S/ ${Number(value || 0).toFixed(2)}`
-        }
-      },
-      grid: {
-        borderColor: 'rgba(148, 163, 184, 0.16)'
+        theme: 'dark'
       }
     };
 
     const inProgress = orders.filter((order) => this.isInProgressStatus(order)).length;
-    const delivered = orders.filter((order) => this.normalizeStatus(order.status) === 'ENTREGADO').length;
+    const delivered = orders.filter((order) => this.normalizeStatus(order.status.value) === 'entregado').length;
     const failed = orders.filter((order) => this.isFailedStatus(order)).length;
-    const cancelled = orders.filter((order) => this.normalizeStatus(order.status) === 'CANCELADO').length;
+    const cancelled = orders.filter((order) => this.normalizeStatus(order.status.value) === 'cancelado').length;
 
     this.statusChartOptions = {
       chart: {
@@ -508,18 +450,11 @@ export class TrackingAnalyticsComponent implements OnInit {
       series: [inProgress, delivered, failed, cancelled],
       colors: ['#f59e0b', '#22c55e', '#ef4444', '#94a3b8'],
       legend: {
-        position: 'bottom',
-        fontFamily: `'Inter', sans-serif`,
-        labels: { colors: '#cbd5e1' }
+        position: 'bottom'
       },
       dataLabels: {
         enabled: true,
-        style: {
-          fontSize: '12px'
-        }
-      },
-      stroke: {
-        colors: ['#111827']
+        style: { fontSize: '12px' }
       },
       tooltip: {
         theme: 'dark'
@@ -529,100 +464,43 @@ export class TrackingAnalyticsComponent implements OnInit {
 
   private resetCharts(): void {
     this.mainChartOptions = {
-      chart: {
-        type: 'bar',
-        height: 360,
-        toolbar: { show: false },
-        background: 'transparent'
-      },
+      chart: { type: 'bar', height: 360 },
       series: [],
       xaxis: { categories: [] }
     };
     this.statusChartOptions = {
-      chart: {
-        type: 'donut',
-        height: 320,
-        toolbar: { show: false },
-        background: 'transparent'
-      },
+      chart: { type: 'donut', height: 320 },
       series: [0, 0, 0, 0],
       labels: ['En Proceso', 'Entregados', 'Fallidos', 'Cancelados']
     };
   }
 
-  private matchesStoreFilter(order: Order): boolean {
+  private matchesStoreFilter(order: DashboardOrderRow): boolean {
     const selected = this.selectedStoreSlugs();
-    if (selected.length === 0) return true;
-    return selected.includes((order.store_slug || '').trim());
+    if (selected.length === 0) {
+      return true;
+    }
+    return selected.includes(String(order.store_slug || '').trim());
   }
 
-  private matchesDataSource(order: Order): boolean {
-    const source = this.getOrderSource(order);
-    if (this.dataSource() === 'internal') {
-      return source !== 'woocommerce';
-    }
-    if (this.dataSource() === 'woocommerce') {
-      return source === 'woocommerce';
-    }
-    if (this.dataSource() === 'bsale') {
-      return source === 'bsale';
-    }
-    return true;
+  private normalizeStatus(status: string | null | undefined): string {
+    return String(status || '').trim().toLowerCase();
   }
 
-  private getOrderSource(order: Order): 'web' | 'redes' | 'bsale' | 'woocommerce' | null {
-    if (order.store_slug) {
-      return 'woocommerce';
-    }
-    if (order.source === 'woocommerce') {
-      return 'woocommerce';
-    }
-    if (order.source) {
-      return order.source;
-    }
-    const role = order.user?.role;
-    if (role === 'vendedor_redes') return 'redes';
-    if (role === 'ventas_web') return 'web';
-    if (!order.user) return 'woocommerce';
-    return null;
+  private isInProgressStatus(order: DashboardOrderRow): boolean {
+    return ['en_proceso', 'empaquetado', 'despachado', 'en_camino'].includes(this.normalizeStatus(order.status.value));
   }
 
-  private isWithinSelectedTimeframe(createdAt: string, now: Date): boolean {
-    const createdDate = new Date(createdAt);
-    if (Number.isNaN(createdDate.getTime())) {
-      return false;
-    }
-
-    if (this.timeframe() === 'day') {
-      return this.isSameDay(createdDate, now);
-    }
-
-    if (this.timeframe() === 'week') {
-      return this.isWithinLastDays(createdDate, now, 7);
-    }
-
-    if (this.timeframe() === 'month') {
-      return createdDate.getFullYear() === now.getFullYear() && createdDate.getMonth() === now.getMonth();
-    }
-
-    const from = this.dateFrom() ? new Date(`${this.dateFrom()}T00:00:00`) : null;
-    const to = this.dateTo() ? new Date(`${this.dateTo()}T23:59:59`) : null;
-
-    if (from && createdDate < from) return false;
-    if (to && createdDate > to) return false;
-    return true;
+  private isFailedStatus(order: DashboardOrderRow): boolean {
+    return this.normalizeStatus(order.status.value) === 'error_en_pedido';
   }
 
-  private isSameDay(dateA: Date, dateB: Date): boolean {
-    return dateA.getFullYear() === dateB.getFullYear() && dateA.getMonth() === dateB.getMonth() && dateA.getDate() === dateB.getDate();
+  private isGainStatus(order: DashboardOrderRow): boolean {
+    return this.isInProgressStatus(order) || this.normalizeStatus(order.status.value) === 'entregado';
   }
 
-  private isWithinLastDays(orderDate: Date, referenceDate: Date, days: number): boolean {
-    const orderDay = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate());
-    const endDay = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
-    const startDay = new Date(endDay);
-    startDay.setDate(startDay.getDate() - (days - 1));
-    return orderDay >= startDay && orderDay <= endDay;
+  private isLossStatus(order: DashboardOrderRow): boolean {
+    return this.isFailedStatus(order) || this.normalizeStatus(order.status.value) === 'cancelado';
   }
 
   private getWeekOfMonth(date: Date): number {
@@ -631,200 +509,21 @@ export class TrackingAnalyticsComponent implements OnInit {
     return Math.ceil((date.getDate() + offset) / 7);
   }
 
-  private normalizeStatus(status: OrderStatus | string | null | undefined): string {
-    return String(status || '').trim().toUpperCase();
-  }
-
-  private isInProgressStatus(order: Order): boolean {
-    return ['EN_PROCESO', 'EMPAQUETADO', 'DESPACHADO', 'EN_CAMINO'].includes(this.normalizeStatus(order.status));
-  }
-
-  private isFailedStatus(order: Order): boolean {
-    return ['ERROR', 'ERROR_EN_PEDIDO'].includes(this.normalizeStatus(order.status));
-  }
-
-  private isGainStatus(order: Order): boolean {
-    return this.isInProgressStatus(order) || this.normalizeStatus(order.status) === 'ENTREGADO';
-  }
-
-  private isLossStatus(order: Order): boolean {
-    return this.isFailedStatus(order) || this.normalizeStatus(order.status) === 'CANCELADO';
-  }
-
-  private getOrderStoreLabel(order: Order): string {
-    if (order.store_slug) {
-      return order.store_slug;
-    }
-    if (order.woo_source) {
-      return order.woo_source;
-    }
-
-    const source = this.getOrderSource(order);
-    switch (source) {
-      case 'web':
-        return 'Web';
-      case 'redes':
-        return 'Redes';
-      case 'woocommerce':
-        return 'WooCommerce';
-      default:
-        return 'Interno';
-    }
-  }
-
-  private getOrderStatusLabel(order: Order): string {
-    if (order.woo_status_label && this.normalizeStatus(order.status) === 'EN_PROCESO') {
-      return order.woo_status_label;
-    }
-    // Bsale 
-    if (order.source === 'bsale' && order.bsale_estado_pedido) {
-      return order.bsale_estado_pedido;
-    }
-    const status = this.normalizeStatus(order.status);
-    const labels: Record<string, string> = {
-      EN_PROCESO: 'En Proceso',
-      EMPAQUETADO: 'Empaquetado',
-      DESPACHADO: 'Despachado',
-      EN_CAMINO: 'En Camino',
-      ENTREGADO: 'Entregado',
-      ERROR: 'Error',
-      ERROR_EN_PEDIDO: 'Error en Pedido',
-      CANCELADO: 'Cancelado'
-    };
-
-    return labels[status] ?? status;
-  }
-
-  private getOrderCreatedAtLabel(order: Order): string {
-    const createdDate = new Date(order.created_at);
-    if (Number.isNaN(createdDate.getTime())) {
-      return order.created_at || '';
-    }
-
-    return new Intl.DateTimeFormat('es-PE', {
-      dateStyle: 'short',
-      timeStyle: 'short'
-    }).format(createdDate);
-  }
-
-  private getOrderItemsSummary(order: Order): string {
-    const items = Array.isArray(order.items) && order.items.length > 0
-      ? order.items.map((item) => ({
-          name: item.product_name,
-          quantity: Number(item.quantity) || 0
-        }))
-      : this.getMetaLineItems(order).map((item) => ({
-          name: item.name,
-          quantity: item.quantity
-        }));
-
-    if (!items.length) {
-      return 'Sin detalle';
-    }
-
-    return items.map((item) => `${item.quantity}x ${item.name}`).join(' | ');
-  }
-
-  private getMetaLineItems(order: Order): Array<{ name: string; quantity: number }> {
-    const meta = order.meta as any;
-    if (!meta || Array.isArray(meta) || !Array.isArray(meta.line_items)) {
-      return [];
-    }
-
-    return meta.line_items.map((item: any) => ({
-      name: item?.name || item?.parent_name || 'Producto',
-      quantity: Number(item?.quantity) || 0
-    }));
-  }
-
-  private getOrderTotal(order: Order): number {
-    return Number(order.total) || 0;
-  }
-
-  private sumBy(orders: Order[], selector: (order: Order) => number): number {
+  private sumBy(orders: DashboardOrderRow[], selector: (order: DashboardOrderRow) => number): number {
     return Number(orders.reduce((sum, order) => sum + selector(order), 0).toFixed(2));
   }
 
-  private refreshAvailableStores(orders: Order[]): void {
-    const mapBySlug = new Map<string, StoreFilterOption>();
-
+  private refreshAvailableStores(orders: DashboardOrderRow[]): void {
+    const stores = new Map<string, StoreFilterOption>();
     for (const order of orders) {
-      const slug = (order.store_slug || '').trim();
-      if (!slug) continue;
-      if (!mapBySlug.has(slug)) {
-        mapBySlug.set(slug, { slug, label: slug });
+      const slug = String(order.store_slug || '').trim();
+      if (!slug) {
+        continue;
+      }
+      if (!stores.has(slug)) {
+        stores.set(slug, { slug, label: slug });
       }
     }
-
-    this.availableStores.set(Array.from(mapBySlug.values()).sort((a, b) => a.label.localeCompare(b.label)));
+    this.availableStores.set(Array.from(stores.values()).sort((a, b) => a.label.localeCompare(b.label)));
   }
-
-  private fetchAllInternalOrders(): Observable<Order[]> {
-    return this.orderService.getOrders(1, this.itemsPerPage).pipe(
-      switchMap((firstPage) => {
-        const allOrders = [...(firstPage.data || [])];
-        const lastPage = firstPage.last_page || 1;
-
-        if (lastPage <= 1) {
-          return of(allOrders);
-        }
-
-        const remaining = Array.from({ length: lastPage - 1 }, (_, index) =>
-          this.orderService.getOrders(index + 2, this.itemsPerPage).pipe(
-            catchError(() => of({ data: [], current_page: index + 2, last_page: lastPage, total: 0 }))
-          )
-        );
-
-        return forkJoin(remaining).pipe(
-          map((pages) => [...allOrders, ...pages.flatMap((page) => page.data || [])])
-        );
-      }),
-      catchError((error) => {
-        console.error('Error fetching tracking analytics orders', error);
-        return of([]);
-      })
-    );
-  }
-  
-  //CARGA LAS PAGINAS DE BSALE SEGUN RANGO DEFINIDO
-   private fetchBsaleOrdersForRange(): Observable<Order[]> {
-    return this.orderService.getBsaleOrdersFirstPage().pipe(
-      switchMap((firstResult) => {
-        const { orders: firstOrders, pagination } = firstResult;
-        const total      = pagination.totalRegistros;
-        const totalPages = Math.ceil(total / pagination.limit);
- 
-        // Inicializa el total de páginas si es la primera vez
-        if (this.bsaleTotalPages() === 0) {
-          this.bsaleTotalPages.set(totalPages);
-          this.bsaleRangeFrom.set(1);
-          this.bsaleRangeTo.set(1);
-          this.bsaleInputFrom.set(1);
-          this.bsaleInputTo.set(1);
-        }
- 
-        const from = this.bsaleRangeFrom();
-        const to   = this.bsaleRangeTo();
- 
-        if (from === 1 && to === 1) {
-          return of(firstOrders);
-        }
- 
-        const pageNumbers = Array.from({ length: to - from + 1 }, (_, i) => from + i);
-        const requests = pageNumbers.map((page) =>
-          this.orderService.getBsaleOrdersPage(page, total).pipe(
-            map((r) => r.orders),
-            catchError(() => of([] as Order[]))
-          )
-        );
- 
-        return forkJoin(requests).pipe(map((pages) => pages.flat()));
-      }),
-      catchError((err) => {
-        console.error('Error fetching Bsale range', err);
-        return of([]);
-      })
-    );
-  }
-
 }

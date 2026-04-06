@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { forkJoin, Observable, of } from 'rxjs';
+import { map, switchMap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { MeResponse } from '../models/auth.model';
 import { User, UserRole, UsersListResponse } from '../models/user.model';
@@ -14,7 +14,7 @@ export class UserService {
 
   constructor(private http: HttpClient) {}
 
-  getUsers(filters?: { page?: number; search?: string }): Observable<UsersListResponse> {
+  getUsers(filters?: { page?: number; search?: string; role?: UserRole | string }): Observable<UsersListResponse> {
     let params = new HttpParams();
 
     if (filters?.page) {
@@ -23,6 +23,10 @@ export class UserService {
 
     if (filters?.search?.trim()) {
       params = params.set('search', filters.search.trim());
+    }
+
+    if (filters?.role) {
+      params = params.set('role', String(filters.role));
     }
 
     return this.http.get<UsersListResponse | User[] | Record<string, unknown>>(`${this.apiUrl}/users`, { params }).pipe(
@@ -65,6 +69,25 @@ export class UserService {
           active_users: typeof response['active_users'] === 'number' ? response['active_users'] : undefined,
           total_users: typeof response['total_users'] === 'number' ? response['total_users'] : undefined
         };
+      })
+    );
+  }
+
+  getAllUsers(search?: string, role?: UserRole | string): Observable<User[]> {
+    return this.getUsers({ page: 1, search, role }).pipe(
+      map((firstPage) => {
+        const lastPage = firstPage.last_page ?? 1;
+        return { firstPage, lastPage };
+      }),
+      switchMap(({ firstPage, lastPage }) => {
+        if (lastPage <= 1) {
+          return of(firstPage.data || []);
+        }
+
+        const requests = Array.from({ length: lastPage - 1 }, (_, index) => this.getUsers({ page: index + 2, search, role }));
+        return forkJoin(requests).pipe(
+          map((pages) => [firstPage, ...pages].flatMap((page) => page.data || []))
+        );
       })
     );
   }

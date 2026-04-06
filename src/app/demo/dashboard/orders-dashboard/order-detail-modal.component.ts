@@ -1,245 +1,285 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ChangeDetectorRef, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Order } from '../../../models/order.model';
-import { OrderTrackingComponent } from './order-tracking.component';
+import { DashboardOrderAllowedTransition, DashboardOrderDetail, DashboardOrderRow } from '../../../models/dashboard-order.model';
+import { OrderStatus } from '../../../models/order.model';
+import { User } from '../../../models/user.model';
+import { DashboardOrdersService } from '../../../services/dashboard-orders.service';
 import { OrderService } from '../../../services/order.service';
+import { UserService } from '../../../services/user.service';
+import {
+  fallbackText,
+  formatDashboardCurrency,
+  formatDashboardDate,
+  getAssignedDeliveryName,
+  getDashboardOrderTitle,
+  getDashboardStatusClass,
+  normalizeDashboardPaymentMethods,
+  normalizeDashboardProducts,
+  resolveDashboardDetailStatus
+} from '../../../utils/dashboard-order-ui.utils';
+import { OrderTrackingComponent } from './order-tracking.component';
 
 @Component({
   selector: 'app-order-detail-modal',
   standalone: true,
-  imports: [CommonModule, OrderTrackingComponent, FormsModule],
+  imports: [CommonModule, FormsModule, OrderTrackingComponent],
   template: `
-    <div class="modal fade" id="orderDetailModal" tabindex="-1" [class.show]="isOpen" [style.display]="isOpen ? 'block' : 'none'">
+    <div class="modal fade" tabindex="-1" [class.show]="isOpen" [style.display]="isOpen ? 'block' : 'none'">
       <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title">
-            <span *ngIf="isBsaleOrder(order)" class="badge bg-info me-2" style="font-size:0.75rem">BSALE</span>
-            Detalles del Pedido #{{ order?.external_id || order?.id }}
+              <span *ngIf="order?.readonly" class="badge bg-info text-dark me-2">BSALE</span>
+              Detalles del Pedido #{{ orderTitle }}
             </h5>
             <button type="button" class="btn-close" (click)="close()"></button>
           </div>
-          <div class="modal-body" *ngIf="order">
-          <!-- BSALE-->
-          <ng-container *ngIf="isBsaleOrder(order); else internalSection">
- 
-              <!-- Aviso solo lectura -->
-              <div class="alert alert-info py-2 px-3 small mb-3">
-                <i class="ti ti-info-circle me-1"></i>
-                Este pedido proviene de <strong>Bsale</strong> y es de solo lectura. El cambio de estado estará disponible próximamente.
+
+          <div class="modal-body">
+            <div *ngIf="loading" class="text-center py-5">
+              <div class="spinner-border" role="status">
+                <span class="visually-hidden">Cargando...</span>
               </div>
- 
-              <!-- Atributos Bsale destacados -->
-              <div class="row mb-3 g-2">
-                <div class="col-md-4">
-                  <div class="card border-0 bsale-highlight-card h-100">
-                    <div class="card-body py-2 px-3">
-                      <p class="text-muted small mb-1">Fecha de Despacho</p>
-                      <strong>{{ order.bsale_fecha_despacho || 'N/A' }}</strong>
+            </div>
+
+            <div *ngIf="!loading && errorMessage" class="alert mb-0" [ngClass]="errorMessageClass">
+              {{ errorMessage }}
+            </div>
+
+            <ng-container *ngIf="!loading && !errorMessage && detail as currentDetail">
+              <ng-container *ngIf="currentDetail.readonly; else editableDetail">
+                <div class="alert alert-info py-2 px-3 small mb-3">
+                  Este pedido proviene de Bsale y es de solo lectura.
+                </div>
+
+                <div class="alert alert-secondary py-2 px-3 small mb-3" *ngIf="readonlyFallbackNotice">
+                  {{ readonlyFallbackNotice }}
+                </div>
+
+                <div class="row mb-3 g-2">
+                  <div class="col-md-4">
+                    <div class="card border-0 highlight-card h-100">
+                      <div class="card-body py-2 px-3">
+                        <p class="text-muted small mb-1">Fecha de Despacho</p>
+                        <strong>{{ formatDate(currentDetail.dispatch_date, 'Sin fecha', false) }}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="card border-0 highlight-card h-100">
+                      <div class="card-body py-2 px-3">
+                        <p class="text-muted small mb-1">Marca / Red Social</p>
+                        <strong>{{ text(currentDetail.location, 'No registrado') }}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="card border-0 highlight-card h-100">
+                      <div class="card-body py-2 px-3">
+                        <p class="text-muted small mb-1">Estado del Pedido</p>
+                        <span class="badge" [ngClass]="statusBadgeClass(currentDetail)">{{ detailStatusLabel(currentDetail) }}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div class="col-md-4">
-                  <div class="card border-0 bsale-highlight-card h-100">
-                    <div class="card-body py-2 px-3">
-                      <p class="text-muted small mb-1">Marca / Red Social</p>
-                      <strong>{{ order.bsale_marca_red_social || 'N/A' }}</strong>
+
+                <hr>
+
+                <div class="row mb-4">
+                  <div class="col-md-6">
+                    <h6 class="text-muted">Informacion del Cliente</h6>
+                    <p><strong>Nombre:</strong> {{ text(currentDetail.customer?.name, 'No registrado') }}</p>
+                    <p><strong>DNI/RUC:</strong> {{ text(currentDetail.customer?.document, 'No registrado') }}</p>
+                    <p><strong>Email:</strong> {{ text(currentDetail.customer?.email, 'No registrado') }}</p>
+                    <p><strong>Telefono:</strong> {{ text(currentDetail.customer?.phone, 'No registrado') }}</p>
+                  </div>
+                  <div class="col-md-6">
+                    <h6 class="text-muted">Informacion del Vendedor</h6>
+                    <p><strong>Vendedor:</strong> {{ text(currentDetail.seller?.name, 'No registrado') }}</p>
+                    <p><strong>Fecha Emision:</strong> {{ formatDate(currentDetail.seller?.issue_date, 'Sin fecha', false) }}</p>
+                    <p><strong>Boleta:</strong> {{ text(currentDetail.seller?.receipt || currentDetail.bsale_receipt, 'No registrado') }}</p>
+                  </div>
+                </div>
+
+                <hr>
+
+                <div class="mb-4">
+                  <h6 class="text-muted">Informacion de Pago</h6>
+                  <div class="row">
+                    <div class="col-md-8">
+                      <p><strong>Metodos:</strong> {{ paymentMethods(currentDetail) }}</p>
+                    </div>
+                    <div class="col-md-4 text-md-end">
+                      <h5 class="text-primary mb-0"><strong>Total: {{ paymentTotal(currentDetail) }}</strong></h5>
                     </div>
                   </div>
                 </div>
-                <div class="col-md-4">
-                  <div class="card border-0 bsale-highlight-card h-100">
-                    <div class="card-body py-2 px-3">
-                      <p class="text-muted small mb-1">Estado del Pedido</p>
-                      <span class="badge bg-warning text-dark">{{ order.bsale_estado_pedido || 'N/A' }}</span>
-                    </div>
+
+                <hr>
+
+                <div class="mb-2">
+                  <h6 class="text-muted">Prendas</h6>
+                  <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th>Nombre</th>
+                          <th>SKU</th>
+                          <th>Cantidad</th>
+                          <th>Precio Unit.</th>
+                          <th>Descuento</th>
+                          <th>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr *ngFor="let product of products(currentDetail)">
+                          <td>{{ text(product.name, '-') }}</td>
+                          <td>{{ text(product.sku, '-') }}</td>
+                          <td>{{ text(product.quantity, '-') }}</td>
+                          <td>{{ money(product.unit_price) }}</td>
+                          <td>{{ money(product.discount) }}</td>
+                          <td><strong>{{ money(product.total) }}</strong></td>
+                        </tr>
+                        <tr *ngIf="products(currentDetail).length === 0">
+                          <td colspan="6" class="text-center text-muted py-4">No hay prendas registradas.</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              </div>
- 
-              <hr>
- 
-              <!-- Cliente + Vendedor -->
-              <div class="row mb-4">
-                <div class="col-md-6">
-                  <h6 class="text-muted">Información del Cliente</h6>
-                  <p><strong>Nombre:</strong> {{ order.customer_name || 'N/A' }}</p>
-                  <p><strong>DNI/RUC:</strong> {{ getBsaleDni(order) }}</p>
-                  <p><strong>Email:</strong> {{ order.customer_email || 'No registrado' }}</p>
-                  <p><strong>Teléfono:</strong> {{ order.customer_phone || 'N/A' }}</p>
+              </ng-container>
+
+              <ng-template #editableDetail>
+                <div class="mb-4">
+                  <h6 class="text-muted mb-3">Estado del Pedido</h6>
+                  <div class="alert alert-info py-2 px-3 small mb-3">
+                    En Proceso y Entregado sincronizan con WooCommerce. Empaquetado, Despachado y En Camino siguen el flujo interno.
+                  </div>
+                  <app-order-tracking
+                    [currentStatus]="trackingStatus(currentDetail)"
+                    [errorReason]="statusUpdateError"
+                    [canEdit]="canEditOrderStatus(currentDetail)"
+                    [allowedTransitions]="allowedTransitions(currentDetail)"
+                    (statusSelected)="onStatusSelected($event)">
+                  </app-order-tracking>
+                  <div class="alert alert-secondary py-2 px-3 small mb-0" *ngIf="transitionsHelpMessage(currentDetail)">
+                    {{ transitionsHelpMessage(currentDetail) }}
+                  </div>
                 </div>
-                <div class="col-md-6">
-                  <h6 class="text-muted">Información del Vendedor</h6>
-                  <p><strong>Vendedor:</strong> {{ order.bsale_vendedor || 'N/A' }}</p>
-                  <p><strong>Fecha Emisión:</strong> {{ order.created_at | date: 'dd/MM/yyyy' }}</p>
-                  <p><strong>Boleta:</strong> {{ order.bsale_boleta || order.external_id }}</p>
+
+                <hr>
+
+                <div class="row mb-4">
+                  <div class="col-md-6">
+                    <h6 class="text-muted">Informacion del Cliente</h6>
+                    <p><strong>Nombre:</strong> {{ text(currentDetail.customer?.name, 'No registrado') }}</p>
+                    <p><strong>DNI:</strong> {{ text(currentDetail.customer?.document, 'No registrado') }}</p>
+                    <p><strong>Email:</strong> {{ text(currentDetail.customer?.email, 'No registrado') }}</p>
+                    <p><strong>Telefono:</strong> {{ text(currentDetail.customer?.phone, 'No registrado') }}</p>
+                  </div>
+                  <div class="col-md-6">
+                    <h6 class="text-muted">Informacion de Entrega</h6>
+                    <p><strong>Ubicacion:</strong> {{ text(currentDetail.location, 'No registrado') }}</p>
+                    <p><strong>Fecha de Despacho:</strong> {{ formatDate(currentDetail.dispatch_date, 'Sin fecha', false) }}</p>
+                    <p><strong>Estado:</strong> <span class="badge" [ngClass]="statusBadgeClass(currentDetail)">{{ detailStatusLabel(currentDetail) }}</span></p>
+                    <p><strong>Numero Pedido:</strong> {{ text(currentDetail.order_number, '-') }}</p>
+                    <p *ngIf="assignedDeliveryName(currentDetail)"><strong>Delivery Asignado:</strong> {{ assignedDeliveryName(currentDetail) }}</p>
+                  </div>
                 </div>
-              </div>
- 
-              <hr>
- 
-              <!-- Pago -->
-              <div class="mb-4">
-                <h6 class="text-muted">Información de Pago</h6>
+
+                <hr>
+
+                <div class="mb-4">
+                  <h6 class="text-muted">Productos</h6>
+                  <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th>Producto</th>
+                          <th>SKU</th>
+                          <th>Cantidad</th>
+                          <th>Precio Unitario</th>
+                          <th>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr *ngFor="let product of products(currentDetail)">
+                          <td>{{ text(product.name, '-') }}</td>
+                          <td>{{ text(product.sku, '-') }}</td>
+                          <td>{{ text(product.quantity, '-') }}</td>
+                          <td>{{ money(product.unit_price) }}</td>
+                          <td><strong>{{ money(product.total) }}</strong></td>
+                        </tr>
+                        <tr *ngIf="products(currentDetail).length === 0">
+                          <td colspan="5" class="text-center text-muted py-4">No hay productos disponibles para este pedido.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <hr>
+
                 <div class="row">
                   <div class="col-md-6">
-                    <p><strong>Métodos:</strong> {{ order.bsale_pago_metodos || 'N/A' }}</p>
+                    <p><strong>Origen:</strong> WooCommerce</p>
+                    <p><strong>ID Local:</strong> {{ currentDetail.id }}</p>
                   </div>
                   <div class="col-md-6 text-md-end">
-                    <h5 class="text-primary"><strong>Total: {{ order.bsale_pago_monto || ('S/ ' + order.total) }}</strong></h5>
+                    <p><strong>Referencia Externa:</strong> {{ text(currentDetail.external_id, '-') }}</p>
+                    <h5 class="text-primary mb-0"><strong>Total: {{ paymentTotal(currentDetail) }}</strong></h5>
                   </div>
                 </div>
-              </div>
- 
-              <hr>
- 
-              <!-- Prendas / Productos -->
-              <div class="mb-4">
-                <h6 class="text-muted">Prendas</h6>
-                <div class="table-responsive">
-                  <table class="table table-sm">
-                    <thead>
-                      <tr>
-                        <th>Nombre</th>
-                        <th>SKU</th>
-                        <th>Cantidad</th>
-                        <th>Precio Unit.</th>
-                        <th>Descuento</th>
-                        <th>Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr *ngFor="let prenda of getBsalePrendas(order)">
-                        <td>{{ prenda.nombre }}</td>
-                        <td><code>{{ prenda.sku }}</code></td>
-                        <td>{{ prenda.cantidad }}</td>
-                        <td>S/ {{ prenda.precioUnitario | number: '1.2-2' }}</td>
-                        <td class="text-danger">
-                          <span *ngIf="prenda.descuentoAplicado > 0">-S/ {{ prenda.descuentoAplicado | number: '1.2-2' }}</span>
-                          <span *ngIf="prenda.descuentoAplicado === 0">—</span>
-                        </td>
-                        <td><strong>S/ {{ prenda.totalAPagar | number: '1.2-2' }}</strong></td>
-                      </tr>
-                      <tr *ngIf="getBsalePrendas(order).length === 0">
-                        <td colspan="6" class="text-muted text-center">No hay prendas registradas.</td>
-                      </tr>
-                    </tbody>
-                  </table>
+
+                <div *ngIf="statusUpdateError" class="alert alert-danger mt-3 mb-0">
+                  {{ statusUpdateError }}
                 </div>
-              </div>
- 
+              </ng-template>
             </ng-container>
-          <!-- FIN BSALE -->
-           <ng-template #internalSection>
-            <!-- Tracking Timeline -->
-            <div class="mb-4">
-              <h6 class="text-muted mb-3">Estado del Pedido - Haz click en los círculos para cambiar estado</h6>
-              <div class="alert alert-info py-2 px-3 small mb-3">
-                En Proceso y Entregado sincronizan con WooCommerce. Empaquetado, Despachado y En Camino son cambios internos. Si marcas error (✕), se cancela en Woo y se registra auditoría con motivo.
-              </div>
-              <app-order-tracking 
-                [currentStatus]="order.status" 
-                [errorReason]="order.error_reason"
-                [canEdit]="canEditOrderStatus(order)"
-                (statusSelected)="onStatusSelected($event)">
-              </app-order-tracking>
-
-              <div class="alert alert-warning py-2 px-3 small mb-0" *ngIf="!canEditOrderStatus(order)">
-                {{ order.update_status_message || 'Este pedido viene directo de WooCommerce y todavia no existe en la tabla local. Sincronizalo para poder cambiar estado.' }}
-              </div>
-            </div>
-
-            <hr>
-
-            <!-- Customer Information -->
-            <div class="row mb-4">
-              <div class="col-md-6">
-                <h6 class="text-muted">Información del Cliente</h6>
-                <p><strong>Nombre:</strong> {{ order.customer_name || order.user?.name || 'N/A' }}</p>
-                <p><strong>DNI:</strong> {{ getCustomerDocument(order) }}</p>
-                <p><strong>Email:</strong> {{ getCustomerEmail(order) }}</p>
-                <p><strong>Teléfono:</strong> {{ getCustomerPhone(order) }}</p>
-              </div>
-              <div class="col-md-6">
-                <h6 class="text-muted">Información de Entrega</h6>
-                <p><strong>Ubicación:</strong> {{ getDeliveryLocation(order) }}</p>
-                <p><strong>Coordenadas:</strong> 
-                  <span *ngIf="getDeliveryCoordinates(order) as coords">
-                    {{ coords.lat }}, {{ coords.lng }}
-                  </span>
-                  <span *ngIf="!getDeliveryCoordinates(order)">N/A</span>
-                </p>
-                <p><strong>Fecha Estimada de Entrega:</strong> {{ getEstimatedDelivery(order) }}</p>
-                <p><strong>Fecha Real de Entrega:</strong> {{ order.delivery_date ? (order.delivery_date | date: 'short') : 'N/A' }}</p>
-              </div>
-            </div>
-
-            <hr>
-
-            <!-- Products -->
-            <div class="mb-4">
-              <h6 class="text-muted">Productos</h6>
-              <div class="table-responsive">
-                <table class="table table-sm">
-                  <thead>
-                    <tr>
-                      <th>Producto</th>
-                      <th>Cantidad</th>
-                      <th>Precio Unitario</th>
-                      <th>Subtotal</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr *ngFor="let item of getOrderItems(order)">
-                      <td>{{ item.product_name }}</td>
-                      <td>{{ item.quantity }}</td>
-                      <td>\${{ item.price | number: '1.2-2' }}</td>
-                      <td>\${{ (item.price * item.quantity) | number: '1.2-2' }}</td>
-                    </tr>
-                    <tr *ngIf="getOrderItems(order).length === 0">
-                      <td colspan="4" class="text-muted">No hay productos disponibles para este pedido.</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <hr>
-
-            <!-- Order Summary -->
-            <div class="row">
-              <div class="col-md-6">
-                <p><strong>Nro Boleta:</strong> {{ order.id }}</p>
-                <p><strong>Origen:</strong> 
-                  <span class="badge" [ngClass]="getOrderSourceBadgeClass(order)">
-                    {{ getOrderSource(order) }}
-                  </span>
-                </p>
-              </div>
-              <div class="col-md-6 text-end">
-                <p><strong>Fecha Creación:</strong> {{ order.created_at | date }}</p>
-                <h5 class="text-primary"><strong>Total: \${{ order.total | number: '1.2-2' }}</strong></h5>
-              </div>
-            </div>
-
-            <!-- Error Reason Display -->
-            <div *ngIf="order.status === 'ERROR' && order.error_reason" class="alert alert-danger mt-3 mb-0">
-              <strong>Motivo del Error:</strong> {{ order.error_reason }}
-            </div>
-
-            <div *ngIf="statusUpdateError" class="alert alert-danger mt-3 mb-0">
-              {{ statusUpdateError }}
-            </div>
-                        </ng-template>
           </div>
+
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" (click)="close()" [disabled]="isLoading">Cerrar</button>
+            <button type="button" class="btn btn-secondary" (click)="close()" [disabled]="loading">Cerrar</button>
           </div>
         </div>
       </div>
     </div>
+
+    <div class="modal fade" tabindex="-1" [class.show]="showDeliveryAssignmentModal" [style.display]="showDeliveryAssignmentModal ? 'block' : 'none'">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Asignar Delivery</h5>
+            <button type="button" class="btn-close" (click)="closeDeliveryAssignmentModal()"></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-muted small mb-3">Selecciona el delivery responsable antes de marcar el pedido como Despachado.</p>
+            <div *ngIf="deliveryUsersLoading" class="text-center py-3">
+              <div class="spinner-border spinner-border-sm" role="status">
+                <span class="visually-hidden">Cargando...</span>
+              </div>
+            </div>
+            <div *ngIf="!deliveryUsersLoading">
+              <select class="form-select" [(ngModel)]="selectedDeliveryUserId">
+                <option [ngValue]="null">Seleccionar delivery</option>
+                <option *ngFor="let user of deliveryUsers" [ngValue]="user.id">
+                  {{ user.name || user.email }}{{ user.is_active === false ? ' (inactivo)' : '' }}
+                </option>
+              </select>
+            </div>
+            <div *ngIf="deliveryAssignmentError" class="alert alert-danger mt-3 mb-0">{{ deliveryAssignmentError }}</div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" (click)="closeDeliveryAssignmentModal()" [disabled]="loading">Cancelar</button>
+            <button type="button" class="btn btn-primary" (click)="confirmDeliveryAssignment()" [disabled]="loading || !selectedDeliveryUserId">Confirmar Despacho</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-backdrop fade" [class.show]="isOpen" *ngIf="isOpen"></div>
+    <div class="modal-backdrop fade" [class.show]="showDeliveryAssignmentModal" *ngIf="showDeliveryAssignmentModal"></div>
   `,
   styles: [`
     .modal.show {
@@ -247,362 +287,336 @@ import { OrderService } from '../../../services/order.service';
       background-color: rgba(0, 0, 0, 0.5);
     }
 
-    .bsale-highlight-card {
+    .highlight-card {
       background-color: #f6f8fb;
       border: 1px solid #e9edf3 !important;
-    }
-
-    :host-context(body.dark-mode) .bsale-highlight-card {
-      background-color: #23272f;
-      border-color: #343b46 !important;
-      color: #e5e7eb;
-    }
-
-    :host-context(body.dark-mode) .bsale-highlight-card .text-muted {
-      color: #aeb8c6 !important;
     }
   `]
 })
 export class OrderDetailModalComponent implements OnChanges {
-  @Input() order: Order | null = null;
+  @Input() order: DashboardOrderRow | null = null;
   @Input() isOpen = false;
   @Output() closeModal = new EventEmitter<void>();
+  @Output() orderChanged = new EventEmitter<void>();
 
-  isLoading = false;
+  detail: DashboardOrderDetail | null = null;
+  loading = false;
+  errorMessage = '';
+  errorMessageClass = 'alert-danger';
   statusUpdateError = '';
+  readonlyFallbackNotice = '';
+  deliveryUsers: User[] = [];
+  deliveryUsersLoading = false;
+  showDeliveryAssignmentModal = false;
+  selectedDeliveryUserId: number | null = null;
+  pendingWorkflowStatus: OrderStatus | null = null;
+  deliveryAssignmentError = '';
+  private postUpdateMessage = '';
 
   constructor(
-    private orderService: OrderService,
-    private cdr: ChangeDetectorRef
+    private readonly dashboardOrdersService: DashboardOrdersService,
+    private readonly orderService: OrderService,
+    private readonly userService: UserService,
+    private readonly cdr: ChangeDetectorRef
   ) {}
 
-  ngOnChanges(changes: SimpleChanges) {}
-
-  //==============INICIO BSALE ====================
-  isBsaleOrder(order: Order | null): boolean {
-    return order?.source === 'bsale';
-  }
- 
-  getBsaleDni(order: Order): string {
-    const raw = order.bsale_raw ?? order.meta;
-    return raw?.cliente?.dni_ruc || 'N/A';
-  }
- 
-  getBsalePrendas(order: Order): any[] {
-    const raw = order.bsale_raw ?? order.meta;
-    return raw?.prendas || [];
-  }
-  //===============FIN BSALE =====================
-  onStatusSelected(event: { status: string; confirmed: boolean; errorReason?: string; evidenceImage?: File }) {
-    if (!event.confirmed || !this.order) return;
-    if (!this.canEditOrderStatus(this.order)) {
-      this.statusUpdateError = this.order.update_status_message || 'Este pedido no se puede actualizar hasta sincronizarse con la base local.';
+  ngOnChanges(changes: SimpleChanges): void {
+    if ((changes['isOpen'] || changes['order']) && this.isOpen && this.order) {
+      this.loadDetail();
       return;
     }
 
+    if (changes['isOpen'] && !this.isOpen) {
+      this.detail = null;
+      this.errorMessage = '';
+      this.errorMessageClass = 'alert-danger';
+      this.statusUpdateError = '';
+      this.postUpdateMessage = '';
+      this.readonlyFallbackNotice = '';
+      this.closeDeliveryAssignmentModal();
+    }
+  }
+
+  get orderTitle(): string {
+    return this.detail ? getDashboardOrderTitle(this.detail) : (this.order ? getDashboardOrderTitle(this.order) : '-');
+  }
+
+  close(): void {
+    this.closeModal.emit();
+  }
+
+  loadDetail(): void {
+    if (!this.order) {
+      return;
+    }
+
+    const resolved = this.dashboardOrdersService.parseDetailEndpoint(this.order.detail_endpoint) ?? {
+      source: this.order.source,
+      id: this.order.source_record_id
+    };
+
+    this.loading = true;
+    this.errorMessage = '';
+    this.errorMessageClass = 'alert-danger';
     this.statusUpdateError = '';
-    this.isLoading = true;
+    this.readonlyFallbackNotice = '';
     this.cdr.markForCheck();
 
-    const resolvedOrderId = this.getOrderIdForStatusUpdate(this.order);
-
-    if (!resolvedOrderId && this.isWooOrder(this.order)) {
-      const lookupKey = this.order.external_id || this.order.woo_order_id || this.order.id;
-      this.orderService.findInternalOrderIdByExternalId(lookupKey).subscribe({
-        next: (internalId) => {
-          if (!internalId) {
-            this.statusUpdateError = 'No se encontro el pedido en la tabla local. Ejecuta sincronizacion y vuelve a intentar.';
-            this.isLoading = false;
-            this.cdr.markForCheck();
-            return;
-          }
-
-          this.order = {
-            ...this.order!,
-            internal_order_id: internalId
-          };
-
-          this.executeStatusUpdate(internalId, event);
-        },
-        error: () => {
-          this.statusUpdateError = 'No se pudo validar el id interno del pedido antes de actualizar estado.';
-          this.isLoading = false;
-          this.cdr.markForCheck();
-        }
-      });
-      return;
-    }
-
-    if (!resolvedOrderId) {
-      this.statusUpdateError = 'No hay id interno para actualizar estado. Sincroniza el pedido Woo con la base local.';
-      this.isLoading = false;
-      this.cdr.markForCheck();
-      return;
-    }
-
-    this.executeStatusUpdate(resolvedOrderId, event);
-  }
-
-  private executeStatusUpdate(updateOrderId: number, event: { status: string; confirmed: boolean; errorReason?: string; evidenceImage?: File }) {
-
-    this.orderService.updateOrderStatus(
-      updateOrderId,
-      event.status as any,
-      {
-        errorReason: event.errorReason,
-        evidenceImage: event.evidenceImage
-      }
-    ).subscribe({
-      next: (response) => {
-        console.log(`Estado actualizado a ${this.getStatusLabel(event.status)}`);
-        this.order = {
-          ...this.order!,
-          ...response,
-          status: (response?.status || event.status) as any
-        };
-
-        if (event.status !== 'ERROR') {
-          this.order.error_reason = response?.error_reason || '';
-        }
-
-        this.isLoading = false;
+    this.dashboardOrdersService.fetchDashboardOrderDetail(resolved.source, resolved.id).subscribe({
+      next: ({ order }) => {
+        this.detail = order;
+        this.loading = false;
+        this.postUpdateMessage = '';
+        this.readonlyFallbackNotice = '';
         this.cdr.markForCheck();
       },
       error: (error) => {
-        console.error('Error al actualizar el estado:', error);
-        console.error('Status:', error.status);
-        console.error('Response:', error.error);
-
-        if (error.status === 404) {
-          this.statusUpdateError = 'No se encontro el pedido en la tabla local. Sincroniza pedidos con el backend y vuelve a intentar.';
-        } else {
-          this.statusUpdateError = error?.error?.message || 'No se pudo actualizar el estado del pedido.';
+        if (error?.status === 403 && this.order?.readonly) {
+          this.detail = this.buildReadonlyFallbackDetail(this.order);
+          this.loading = false;
+          this.errorMessage = '';
+          this.errorMessageClass = 'alert-info';
+          this.readonlyFallbackNotice = 'El backend no habilito el detalle ampliado para este pedido Bsale en tu rol actual. Se muestra un resumen de solo lectura con la informacion disponible en la tabla.';
+          this.cdr.markForCheck();
+          return;
         }
 
-        this.isLoading = false;
+        this.detail = null;
+        this.loading = false;
+        if (error?.status === 403 && this.postUpdateMessage) {
+          this.errorMessage = this.postUpdateMessage;
+          this.errorMessageClass = 'alert-info';
+        } else if (error?.status === 403) {
+          this.errorMessage = 'Este pedido ya no forma parte de tu cola activa o ya no tienes permisos para verlo en detalle.';
+          this.errorMessageClass = 'alert-warning';
+        } else {
+          this.errorMessage = 'No se pudo cargar el detalle del pedido.';
+          this.errorMessageClass = 'alert-danger';
+        }
         this.cdr.markForCheck();
       }
     });
   }
 
-  private getOrderIdForStatusUpdate(order: Order): number | null {
-    if (order.internal_order_id) {
-      return order.internal_order_id;
-    }
-
-    const idValue = Number(order.id);
-    const externalNumeric = Number(order.external_id);
-    const looksLikeWooDirectId = !Number.isNaN(idValue) && !Number.isNaN(externalNumeric) && idValue === externalNumeric;
-
-    // When data comes from local DB, id is local and typically differs from external_id.
-    if (!looksLikeWooDirectId && idValue > 0) {
-      return idValue;
-    }
-
-    if (this.isWooOrder(order)) {
-      return null;
-    }
-
-    return null;
+  canEditOrderStatus(detail: DashboardOrderDetail | null): boolean {
+    return !!detail && !detail.readonly && detail.id > 0 && this.allowedTransitions(detail).length > 0;
   }
 
-  private isWooOrder(order: Order): boolean {
-    return order.source === 'woocommerce' || !!order.store_slug || !!order.woo_order_id;
-  }
-
-  canEditOrderStatus(order: Order | null): boolean {
-    if (!order) return false;
-    return this.getOrderIdForStatusUpdate(order) !== null;
-  }
-
-  getOrderSource(order?: Order): string {
-    if (!order) return 'Desconocido';
-
-    if (order.store_slug) {
-      return order.store_slug;
-    }
-
-    if (order.woo_source || order.source === 'woocommerce' || order.store_slug) {
-      return order.woo_source || 'WooCommerce';
-    }
-
-    const role = order.user.role?.toLowerCase();
-    if (role?.includes('web')) return 'Web';
-    if (role?.includes('redes')) return 'Redes';
-
-    return 'Redes';
-  }
-
-  getOrderSourceBadgeClass(order?: Order): string {
-    if (!order) return 'bg-secondary';
-    if (order.woo_source || order.source === 'woocommerce' || order.store_slug) return 'bg-warning';
-
-    const role = order.user?.role?.toLowerCase();
-    if (role?.includes('web')) return 'bg-primary';
-    if (role?.includes('redes')) return 'bg-info';
-
-    return 'bg-secondary';
-  }
-
-  getStatusLabel(status: string): string {
-    const labels: { [key: string]: string } = {
-      'EN_PROCESO': 'En Proceso',
-      'EMPAQUETADO': 'Empaquetado',
-      'DESPACHADO': 'Despachado',
-      'EN_CAMINO': 'En Camino',
-      'ENTREGADO': 'Entregado',
-      'ERROR': 'Error',
-      'CANCELADO': 'Cancelado'
+  trackingStatus(detail: DashboardOrderDetail | null): string {
+    const resolved = resolveDashboardDetailStatus(detail);
+    const map: Record<string, string> = {
+      en_proceso: OrderStatus.EN_PROCESO,
+      empaquetado: OrderStatus.EMPAQUETADO,
+      despachado: OrderStatus.DESPACHADO,
+      en_camino: OrderStatus.EN_CAMINO,
+      entregado: OrderStatus.ENTREGADO,
+      error_en_pedido: OrderStatus.ERROR_EN_PEDIDO,
+      cancelado: OrderStatus.CANCELADO
     };
-    return labels[status] || status;
+    return map[resolved.value] || OrderStatus.EN_PROCESO;
   }
 
-  // helper para fechas estimadas en modal
-  formatEstimated(date: string): string {
-    if (!date) return 'N/A';
-    if (date.includes(' y ')) return date;
-    const d = new Date(date);
-    if (!isNaN(d.getTime())) {
-      return new Intl.DateTimeFormat('es-PE', { dateStyle: 'short' }).format(d);
+  allowedTransitions(detail: DashboardOrderDetail | null): DashboardOrderAllowedTransition[] {
+    return detail?.allowed_transitions ?? [];
+  }
+
+  transitionsHelpMessage(detail: DashboardOrderDetail | null): string {
+    if (!detail || detail.readonly) {
+      return '';
     }
-    return date;
+
+    const transitions = this.allowedTransitions(detail);
+    if (transitions.length === 0) {
+      return 'No hay acciones disponibles para este pedido en este momento.';
+    }
+
+    const labels = transitions.map((transition) => transition.label);
+    const message = `Acciones disponibles: ${labels.join(', ')}.`;
+
+    return transitions.some((transition) => transition.requires_delivery_user_id)
+      ? `${message} Algunas transiciones requieren asignar un delivery antes de confirmar.`
+      : message;
   }
 
-  getCustomerEmail(order: Order): string {
-    return order.customer_email || (order.meta as any)?.billing?.email || 'N/A';
+  assignedDeliveryName(detail: DashboardOrderDetail): string {
+    return getAssignedDeliveryName(detail);
   }
 
-  getCustomerPhone(order: Order): string {
-    return order.customer_phone || (order.meta as any)?.billing?.phone || 'N/A';
+  onStatusSelected(event: { status: string; confirmed: boolean; errorReason?: string; evidenceImage?: File }): void {
+    if (!event.confirmed || !this.detail || !this.canEditOrderStatus(this.detail)) {
+      return;
+    }
+
+    if (this.transitionRequiresDeliveryUser(this.detail, event.status)) {
+      this.pendingWorkflowStatus = event.status as OrderStatus;
+      this.openDeliveryAssignmentModal();
+      return;
+    }
+
+    this.submitStatusUpdate(event.status as OrderStatus, event.errorReason, event.evidenceImage);
   }
 
-  getCustomerDocument(order: Order): string {
-    const meta = order.meta as any;
-    if (meta && !Array.isArray(meta)) {
-      const direct =
-        this.findMetaValue(meta.meta_data, 'dni_ce') ||
-        this.findMetaValue(meta.meta_data, '_billing_dni_ce') ||
-        this.findMetaValue(meta.meta_data, 'billing_documento') ||
-        this.findMetaValue(meta.meta_data, '_billing_documento') ||
-        this.findMetaValue(meta.meta_data, 'document_number') ||
-        this.findMetaValue(meta.meta_data, 'dni');
+  confirmDeliveryAssignment(): void {
+    if (!this.pendingWorkflowStatus || !this.selectedDeliveryUserId) {
+      return;
+    }
 
-      if (direct) {
-        return direct;
+    this.submitStatusUpdate(this.pendingWorkflowStatus, undefined, undefined, this.selectedDeliveryUserId);
+  }
+
+  closeDeliveryAssignmentModal(): void {
+    this.showDeliveryAssignmentModal = false;
+    this.selectedDeliveryUserId = null;
+    this.pendingWorkflowStatus = null;
+    this.deliveryAssignmentError = '';
+  }
+
+  private openDeliveryAssignmentModal(): void {
+    this.showDeliveryAssignmentModal = true;
+    this.deliveryAssignmentError = '';
+    this.selectedDeliveryUserId = this.detail?.assigned_delivery_user_id ?? null;
+    if (this.deliveryUsers.length > 0) {
+      return;
+    }
+
+    this.deliveryUsersLoading = true;
+    this.userService.getAllUsers(undefined, 'delivery').subscribe({
+      next: (users) => {
+        this.deliveryUsers = [...users].sort((left, right) => Number(right.is_active !== false) - Number(left.is_active !== false));
+        this.deliveryUsersLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.deliveryUsers = [];
+        this.deliveryUsersLoading = false;
+        this.deliveryAssignmentError = 'No se pudo cargar la lista de deliverys.';
+        this.cdr.markForCheck();
       }
-    }
-
-    return 'N/A';
+    });
   }
 
-  getDeliveryLocation(order: Order): string {
-    if (order.delivery_location && order.delivery_location.trim()) {
-      return order.delivery_location;
+  private submitStatusUpdate(status: OrderStatus, errorReason?: string, evidenceImage?: File, deliveryUserId?: number): void {
+    if (!this.detail) {
+      return;
     }
 
-    const meta = order.meta as any;
-    if (meta && !Array.isArray(meta)) {
-      const mapAddress = this.findMetaValue(meta.meta_data, '_billing_direccion_mapa');
-      if (mapAddress) return mapAddress;
+    this.loading = true;
+    this.statusUpdateError = '';
+    this.deliveryAssignmentError = '';
+    this.cdr.markForCheck();
 
-      const shippingAddress = `${meta.shipping?.address_1 || ''} ${meta.shipping?.city || ''}`.trim();
-      if (shippingAddress) return shippingAddress;
+    this.orderService.updateOrderStatus(this.detail.id, status, {
+      errorReason,
+      evidenceImage,
+      deliveryUserId
+    }).subscribe({
+      next: () => {
+        this.postUpdateMessage = this.buildPostUpdateMessage(status);
+        this.closeDeliveryAssignmentModal();
+        this.orderChanged.emit();
+        this.loadDetail();
+      },
+      error: (error) => {
+        this.loading = false;
+        const statusCode = error?.status;
+        const message = error?.error?.message || 'No se pudo actualizar el estado del pedido.';
 
-      const billingAddress = `${meta.billing?.address_1 || ''} ${meta.billing?.city || ''}`.trim();
-      if (billingAddress) return billingAddress;
-    }
+        if (statusCode === 403 || statusCode === 422) {
+          this.orderChanged.emit();
+          this.loadDetail();
+        }
 
-    return 'N/A';
-  }
-
-  getDeliveryCoordinates(order: Order): { lat: number; lng: number } | null {
-    if (order.delivery_coordinates) {
-      return order.delivery_coordinates;
-    }
-
-    const meta = order.meta as any;
-    if (meta && !Array.isArray(meta)) {
-      const latRaw = this.findMetaValue(meta.meta_data, '_billing_cordenada_latitud') || this.findMetaValue(meta.meta_data, '_shipping_latitude');
-      const lngRaw = this.findMetaValue(meta.meta_data, '_billing_cordenada_longitud') || this.findMetaValue(meta.meta_data, '_shipping_longitude');
-      const lat = Number(latRaw);
-      const lng = Number(lngRaw);
-      if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
-        return { lat, lng };
+        if (this.showDeliveryAssignmentModal) {
+          this.deliveryAssignmentError = message;
+        } else {
+          this.statusUpdateError = message;
+        }
+        this.cdr.markForCheck();
       }
-    }
-
-    return null;
+    });
   }
 
-  getEstimatedDelivery(order: Order): string {
-    if (order.estimated_delivery_date) {
-      return this.formatEstimated(order.estimated_delivery_date);
+  private buildPostUpdateMessage(status: OrderStatus): string {
+    if (status === OrderStatus.ERROR_EN_PEDIDO) {
+      return 'Error recibido. Sera adjuntado al nuevo estado del pedido y notificado al Despachador para cancelar o solucionar el error.';
     }
 
-    const meta = order.meta as any;
-    if (meta && !Array.isArray(meta)) {
-      const direct =
-        this.findMetaValue(meta.meta_data, '_delivery_date') ||
-        this.findMetaValue(meta.meta_data, 'delivery_date') ||
-        this.findMetaValue(meta.meta_data, 'estimated_delivery_date') ||
-        this.findMetaValue(meta.meta_data, '_estimated_delivery_date') ||
-        this.findMetaValue(meta.meta_data, '_billing_fecha_entrega');
-
-      if (direct) {
-        return this.formatEstimated(String(direct));
-      }
-
-      const f1 = this.findMetaValue(meta.meta_data, '_billing_fecha_entrega_1');
-      const f2 = this.findMetaValue(meta.meta_data, '_billing_fecha_entrega_2');
-      if (f1 && f2) return `${f1} y ${f2}`;
-      if (f1) return String(f1);
+    if (status === OrderStatus.ENTREGADO) {
+      return 'Entrega registrada correctamente. El pedido saldra de tu cola activa cuando el backend confirme el nuevo estado.';
     }
 
-    return 'N/A';
+    if (status === OrderStatus.EN_CAMINO) {
+      return 'El pedido fue actualizado correctamente y la cola operativa se recargara con el nuevo estado.';
+    }
+
+    return '';
   }
 
-  getOrderItems(order: Order): Array<{ product_name: string; quantity: number; price: number }> {
-    if (Array.isArray(order.items) && order.items.length > 0) {
-      return order.items.map((item) => ({
-        product_name: item.product_name,
-        quantity: Number(item.quantity) || 0,
-        price: Number(item.price) || 0
-      }));
-    }
-
-    const meta = order.meta as any;
-    const lineItems = meta?.line_items;
-    if (Array.isArray(lineItems)) {
-      return lineItems.map((item: any) => {
-        const quantity = Number(item?.quantity) || 0;
-        const total = Number(item?.total);
-        const unitFromPrice = Number(item?.price);
-        const unitPrice = !Number.isNaN(unitFromPrice)
-          ? unitFromPrice
-          : (quantity > 0 && !Number.isNaN(total) ? total / quantity : 0);
-
-        return {
-          product_name: item?.name || item?.parent_name || 'Producto',
-          quantity,
-          price: Number.isNaN(unitPrice) ? 0 : unitPrice
-        };
-      });
-    }
-
-    return [];
+  private transitionRequiresDeliveryUser(detail: DashboardOrderDetail | null, status: string): boolean {
+    return this.allowedTransitions(detail).some(
+      (transition) => transition.value === this.normalizeTransitionValue(status) && transition.requires_delivery_user_id
+    );
   }
 
-  private findMetaValue(metaData: any, key: string): string | null {
-    if (!Array.isArray(metaData)) {
-      return null;
-    }
-    const entry = metaData.find((m: any) => m?.key === key);
-    return entry?.value != null ? String(entry.value) : null;
+  private normalizeTransitionValue(status: string): DashboardOrderAllowedTransition['value'] {
+    return status.toLowerCase() as DashboardOrderAllowedTransition['value'];
   }
 
+  private buildReadonlyFallbackDetail(order: DashboardOrderRow): DashboardOrderDetail {
+    return {
+      source: order.source,
+      readonly: true,
+      id: order.source_record_id,
+      external_id: order.bsale_receipt || order.order_number,
+      order_number: order.order_number,
+      bsale_receipt: order.bsale_receipt,
+      status: order.status,
+      dispatch_date: order.dispatch_date ?? order.delivery_date,
+      location: order.location,
+      customer: order.customer ?? {
+        name: order.customer_name
+      },
+      seller: order.seller ?? {
+        name: order.vendor_name,
+        receipt: order.bsale_receipt
+      },
+      payment: order.payment ?? {
+        total: order.total
+      },
+      products: order.products ?? []
+    };
+  }
 
+  text(value: unknown, fallback: string): string {
+    return fallbackText(value, fallback);
+  }
 
-  close() {
-    this.closeModal.emit();
+  formatDate(value: string | null | undefined, fallback: string, includeTime: boolean): string {
+    return formatDashboardDate(value, fallback, includeTime);
+  }
+
+  money(value: number | string | null | undefined): string {
+    return formatDashboardCurrency(value);
+  }
+
+  products(detail: DashboardOrderDetail) {
+    return normalizeDashboardProducts(detail.products);
+  }
+
+  paymentMethods(detail: DashboardOrderDetail): string {
+    const methods = normalizeDashboardPaymentMethods(detail.payment?.methods);
+    return methods.length ? methods.join(', ') : 'No registrado';
+  }
+
+  paymentTotal(detail: DashboardOrderDetail): string {
+    return formatDashboardCurrency(detail.payment?.total ?? this.order?.total ?? 0);
+  }
+
+  detailStatusLabel(detail: DashboardOrderDetail): string {
+    return resolveDashboardDetailStatus(detail).label;
+  }
+
+  statusBadgeClass(detail: DashboardOrderDetail): string {
+    return getDashboardStatusClass(resolveDashboardDetailStatus(detail).value);
   }
 }

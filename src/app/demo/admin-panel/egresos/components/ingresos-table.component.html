@@ -9,28 +9,28 @@
       </tr>
     </thead>
     <tbody>
-      <tr *ngIf="loading && paginatedIngresos.length === 0">
+      <tr *ngIf="loading && visibleIngresos.length === 0">
         <td colspan="4" class="text-center py-4">
           <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
           Cargando ingresos...
         </td>
       </tr>
-      <tr *ngFor="let ingreso of paginatedIngresos; trackBy: trackByIngreso">
+      <tr *ngFor="let ingreso of visibleIngresos; trackBy: trackByIngreso">
         <td>{{ ingreso.boleta }}</td>
         <td>{{ ingreso.fecha | date:'short' }}</td>
         <td>{{ ingreso.precio | currency:'PEN':'symbol' }}</td>
         <td>{{ ingreso.tienda }}<span *ngIf="ingreso.vendedor"> / {{ ingreso.vendedor }}</span></td>
       </tr>
-      <tr *ngIf="!loading && paginatedIngresos.length === 0">
+      <tr *ngIf="!loading && visibleIngresos.length === 0">
         <td colspan="4" class="text-center py-4">No hay ingresos para este filtro.</td>
       </tr>
     </tbody>
   </table>
 </div>
 
-<div class="pagination-bar" *ngIf="ingresos.length > 0">
+<div class="pagination-bar" *ngIf="totalItems > 0">
   <small class="text-muted">
-    Mostrando {{ visibleStart }}-{{ visibleEnd }} de {{ ingresos.length }} ingresos
+    Mostrando {{ visibleStart }}-{{ visibleEnd }} de {{ totalItems }} ingresos
   </small>
 
   <div class="btn-group btn-group-sm" role="group" aria-label="Paginacion de ingresos">
