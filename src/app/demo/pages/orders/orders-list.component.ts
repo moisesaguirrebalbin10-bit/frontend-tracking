@@ -11,6 +11,7 @@ import {
 import { UserRole } from '../../../models/user.model';
 import { AuthService } from '../../../services/auth.service';
 import { DashboardOrdersService } from '../../../services/dashboard-orders.service';
+import { WooCommerceService, WooCommerceStore } from '../../../services/woocommerce.service';
 import { RouteSearchService } from '../../../theme/shared/service/route-search.service';
 import {
   fallbackText,
@@ -84,6 +85,14 @@ type DashboardPeriod = 'day' | 'week' | 'month' | 'range';
                   <option value="50">50</option>
                   <option value="100">100</option>
                 </select>
+              </div>
+
+              <div class="d-flex align-items-center gap-2 flex-wrap mt-3" *ngIf="showWooStoreFilter">
+                <span class="text-muted small fw-semibold">Tienda:</span>
+                <button class="btn btn-sm" [ngClass]="selectedWooStore() === '' ? 'btn-primary' : 'btn-outline-primary'" (click)="clearWooStoreFilter()">Todas</button>
+                <button class="btn btn-sm" *ngFor="let store of wooStores()" [ngClass]="selectedWooStore() === store.slug ? 'btn-warning' : 'btn-outline-secondary'" (click)="setWooStore(store.slug)">
+                  {{ store.label }}
+                </button>
               </div>
 
               <div class="d-flex align-items-center gap-2 flex-wrap mt-3" *ngIf="period() === 'range'">
@@ -228,6 +237,8 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   readonly scope = signal<DashboardOrdersScope>('all');
   readonly period = signal<DashboardPeriod>('day');
   readonly status = signal<DashboardOrderStatusValue | ''>('');
+  readonly selectedWooStore = signal('');
+  readonly wooStores = signal<WooCommerceStore[]>([]);
   readonly dateFrom = signal('');
   readonly dateTo = signal('');
   readonly perPage = signal(20);
@@ -249,13 +260,16 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
   private readonly authService = inject(AuthService);
   private readonly dashboardOrdersService = inject(DashboardOrdersService);
+  private readonly wooCommerceService = inject(WooCommerceService);
   private readonly routeSearchService = inject(RouteSearchService);
   private readonly searchTerm = signal('');
   private cachedRows: DashboardOrderRow[] = [];
   private cachedPagination: DashboardOrdersResponse | null = null;
+  private locallyFilteredRows: DashboardOrderRow[] = [];
   private searchReady = false;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private requestId = 0;
+  private localFilterRequestId = 0;
 
   constructor() {
     this.scope.set(this.isAdminUser ? 'all' : 'my_queue');
@@ -273,6 +287,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.loadWooStores();
     this.reload();
   }
 
@@ -306,6 +321,10 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
   get showStatusFilter(): boolean {
     return !this.isEmpaquetadorUser;
+  }
+
+  get showWooStoreFilter(): boolean {
+    return this.effectiveSource === 'woo' && this.wooStores().length > 0;
   }
 
   get visibleStatusOptions(): Array<{ value: DashboardOrderStatusValue; label: string }> {
@@ -345,6 +364,27 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
   setSource(source: DashboardOrderSource): void {
     this.source.set(source);
+    if (source !== 'woo') {
+      this.selectedWooStore.set('');
+    }
+    this.page.set(1);
+    this.reload();
+  }
+
+  setWooStore(storeSlug: string): void {
+    if (this.selectedWooStore() === storeSlug) {
+      return;
+    }
+    this.selectedWooStore.set(storeSlug);
+    this.page.set(1);
+    this.reload();
+  }
+
+  clearWooStoreFilter(): void {
+    if (!this.selectedWooStore()) {
+      return;
+    }
+    this.selectedWooStore.set('');
     this.page.set(1);
     this.reload();
   }
@@ -406,6 +446,11 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   reload(): void {
+    if (this.hasActiveWooStoreFilter()) {
+      this.reloadWithWooStoreFilter();
+      return;
+    }
+
     const requestId = ++this.requestId;
     this.loading.set(true);
     this.error.set('');
@@ -454,6 +499,46 @@ export class OrdersListComponent implements OnInit, OnDestroy {
           to: null,
           total: 0
         });
+        this.loading.set(false);
+      }
+    });
+  }
+
+  private reloadWithWooStoreFilter(): void {
+    const requestId = ++this.localFilterRequestId;
+    this.loading.set(true);
+    this.error.set('');
+
+    this.dashboardOrdersService.fetchAllDashboardOrders(this.buildWooStoreLocalQuery()).subscribe({
+      next: (rows) => {
+        if (requestId !== this.localFilterRequestId) {
+          return;
+        }
+
+        const filteredRows = this.applyWooStoreLocalFilters(rows);
+        this.cachedRows = filteredRows;
+        this.cachedPagination = null;
+        this.locallyFilteredRows = filteredRows;
+        this.applyLocalPagination(filteredRows);
+        this.loading.set(false);
+      },
+      error: () => {
+        if (requestId !== this.localFilterRequestId) {
+          return;
+        }
+
+        this.locallyFilteredRows = [];
+        this.orders.set([]);
+        this.pagination.set({
+          current_page: 1,
+          data: [],
+          from: null,
+          last_page: 1,
+          per_page: this.perPage(),
+          to: null,
+          total: 0
+        });
+        this.error.set('No se pudo cargar el listado de pedidos.');
         this.loading.set(false);
       }
     });
@@ -510,8 +595,18 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       date_to: bounds.dateTo,
       search: this.searchTerm() || undefined,
       status: this.effectiveStatus,
+      store_slug: this.effectiveSource === 'woo' ? this.selectedWooStore() || undefined : undefined,
       page: this.page(),
       per_page: this.perPage()
+    };
+  }
+
+  private buildWooStoreLocalQuery(): Omit<DashboardOrdersQuery, 'page' | 'per_page'> {
+    const query = this.buildQuery();
+    return {
+      ...query,
+      search: undefined,
+      store_slug: undefined
     };
   }
 
@@ -586,8 +681,27 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     return this.authService.getCurrentUser()?.role === UserRole.EMPAQUETADOR;
   }
 
+  private loadWooStores(): void {
+    this.wooCommerceService.listStores().subscribe({
+      next: (stores) => {
+        this.wooStores.set(
+          [...stores]
+            .filter((store) => !!String(store.slug || '').trim())
+            .sort((left, right) => left.label.localeCompare(right.label))
+        );
+      },
+      error: () => {
+        this.wooStores.set([]);
+      }
+    });
+  }
+
   private hasActiveSearch(): boolean {
     return !!this.searchTerm().trim();
+  }
+
+  private hasActiveWooStoreFilter(): boolean {
+    return this.effectiveSource === 'woo' && !!this.selectedWooStore().trim();
   }
 
   private getFallbackSearchRows(): DashboardOrderRow[] {
@@ -611,5 +725,46 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     ];
 
     return values.some((value) => String(value || '').toLowerCase().includes(term));
+  }
+
+  private applyWooStoreLocalFilters(rows: DashboardOrderRow[]): DashboardOrderRow[] {
+    const selectedStore = this.selectedWooStore().trim().toLowerCase();
+    const term = this.searchTerm().trim().toLowerCase();
+
+    return rows.filter((row) => {
+      const rowStore = String(row.store_slug || '').trim().toLowerCase();
+      if (selectedStore && rowStore !== selectedStore) {
+        return false;
+      }
+
+      if (term && !this.rowMatchesSearch(row, term)) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  private applyLocalPagination(rows: DashboardOrderRow[]): void {
+    const total = rows.length;
+    const lastPage = Math.max(1, Math.ceil(total / this.perPage()));
+    const currentPage = Math.min(this.page(), lastPage);
+    const startIndex = (currentPage - 1) * this.perPage();
+    const pagedRows = rows.slice(startIndex, startIndex + this.perPage());
+
+    if (currentPage !== this.page()) {
+      this.page.set(currentPage);
+    }
+
+    this.orders.set(pagedRows);
+    this.pagination.set({
+      current_page: currentPage,
+      data: pagedRows,
+      from: total ? startIndex + 1 : null,
+      last_page: lastPage,
+      per_page: this.perPage(),
+      to: total ? startIndex + pagedRows.length : null,
+      total
+    });
   }
 }

@@ -58,6 +58,7 @@ export interface DashboardOrdersFilters {
   date_to?: string;
   search?: string;
   status?: DashboardOrderStatusValue;
+  store_slug?: string;
 }
 
 export interface DashboardOrdersQuery extends DashboardOrdersFilters {

@@ -1,9 +1,11 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { EMPTY, Observable } from 'rxjs';
+import { expand, map, reduce } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import {
   DashboardOrderDetailResponse,
+  DashboardOrderRow,
   DashboardOrdersMetricsResponse,
   DashboardOrdersQuery,
   DashboardOrdersResponse,
@@ -22,6 +24,27 @@ export class DashboardOrdersService {
     return this.http.get<DashboardOrdersResponse>(this.apiUrl, {
       params: this.buildParams(params)
     });
+  }
+
+  fetchAllDashboardOrders(
+    params: Omit<DashboardOrdersQuery, 'page' | 'per_page'>,
+    perPage: number = 100
+  ): Observable<DashboardOrderRow[]> {
+    return this.fetchDashboardOrders({ ...params, page: 1, per_page: perPage }).pipe(
+      expand((response) => {
+        if (response.current_page >= response.last_page) {
+          return EMPTY;
+        }
+
+        return this.fetchDashboardOrders({
+          ...params,
+          page: response.current_page + 1,
+          per_page: perPage
+        });
+      }),
+      reduce((rows, response) => rows.concat(response.data || []), [] as DashboardOrderRow[]),
+      map((rows) => rows.filter((row) => !!row))
+    );
   }
 
   fetchDashboardMetrics(params: Omit<DashboardOrdersQuery, 'page' | 'per_page'>): Observable<DashboardOrdersMetricsResponse> {

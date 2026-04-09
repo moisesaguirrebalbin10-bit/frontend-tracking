@@ -12,6 +12,7 @@ import {
 import { UserRole } from '../../../models/user.model';
 import { AuthService } from '../../../services/auth.service';
 import { DashboardOrdersService } from '../../../services/dashboard-orders.service';
+import { WooCommerceService, WooCommerceStore } from '../../../services/woocommerce.service';
 import { RouteSearchService } from '../../../theme/shared/service/route-search.service';
 import {
   fallbackText,
@@ -93,6 +94,22 @@ type DashboardPeriod = 'day' | 'week' | 'month' | 'range';
                 <button class="btn btn-sm" [ngClass]="status() === '' ? 'btn-primary' : 'btn-outline-primary'" (click)="setStatus('')">Todos</button>
                 <button class="btn btn-sm" *ngFor="let item of statusOptions" [ngClass]="status() === item.value ? 'btn-primary' : 'btn-outline-secondary'" (click)="setStatus(item.value)">
                   {{ item.label }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row mb-3 g-2" *ngIf="showWooStoreFilter">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-body py-2">
+              <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span class="text-muted fw-semibold"><i class="ti ti-building-store me-1"></i>Tienda:</span>
+                <button class="btn btn-sm" [ngClass]="selectedWooStore() === '' ? 'btn-primary' : 'btn-outline-primary'" (click)="clearWooStoreFilter()">Todas</button>
+                <button class="btn btn-sm" *ngFor="let store of wooStores()" [ngClass]="selectedWooStore() === store.slug ? 'btn-warning' : 'btn-outline-secondary'" (click)="setWooStore(store.slug)">
+                  {{ store.label }}
                 </button>
               </div>
             </div>
@@ -285,6 +302,8 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
   readonly scope = signal<DashboardOrdersScope>('all');
   readonly period = signal<DashboardPeriod>('day');
   readonly status = signal<DashboardOrderStatusValue | ''>('');
+  readonly selectedWooStore = signal('');
+  readonly wooStores = signal<WooCommerceStore[]>([]);
   readonly dateFrom = signal('');
   readonly dateTo = signal('');
   readonly page = signal(1);
@@ -315,14 +334,17 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
 
   private readonly authService = inject(AuthService);
   private readonly dashboardOrdersService = inject(DashboardOrdersService);
+  private readonly wooCommerceService = inject(WooCommerceService);
   private readonly routeSearchService = inject(RouteSearchService);
   private readonly searchTerm = signal('');
   private cachedRows: DashboardOrderRow[] = [];
   private cachedPagination: DashboardOrdersResponse | null = null;
+  private locallyFilteredRows: DashboardOrderRow[] = [];
   private searchReady = false;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private metricsRequestId = 0;
   private listRequestId = 0;
+  private localFilterRequestId = 0;
 
   constructor() {
     this.scope.set(this.isAdminUser ? 'all' : 'my_queue');
@@ -340,6 +362,7 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.loadWooStores();
     this.refreshAll();
   }
 
@@ -375,6 +398,10 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
     return !this.isDeliveryUser;
   }
 
+  get showWooStoreFilter(): boolean {
+    return this.effectiveSource === 'woo' && this.wooStores().length > 0;
+  }
+
   get metricCards(): Array<{ label: string; value: string | number; className?: string }> {
     const metrics = this.metrics();
     return [
@@ -408,6 +435,27 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
 
   setSource(source: DashboardOrderSource): void {
     this.source.set(source);
+    if (source !== 'woo') {
+      this.selectedWooStore.set('');
+    }
+    this.page.set(1);
+    this.refreshAll();
+  }
+
+  setWooStore(storeSlug: string): void {
+    if (this.selectedWooStore() === storeSlug) {
+      return;
+    }
+    this.selectedWooStore.set(storeSlug);
+    this.page.set(1);
+    this.refreshAll();
+  }
+
+  clearWooStoreFilter(): void {
+    if (!this.selectedWooStore()) {
+      return;
+    }
+    this.selectedWooStore.set('');
     this.page.set(1);
     this.refreshAll();
   }
@@ -516,6 +564,11 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
   }
 
   refreshAll(): void {
+    if (this.hasActiveWooStoreFilter()) {
+      this.refreshWooStoreFilteredDashboard();
+      return;
+    }
+
     this.refreshMetrics();
     this.refreshList();
   }
@@ -554,6 +607,18 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
   }
 
   private refreshList(): void {
+    if (this.hasActiveWooStoreFilter()) {
+      if (this.locallyFilteredRows.length > 0) {
+        this.listLoading.set(false);
+        this.listError.set('');
+        this.applyLocalPagination(this.locallyFilteredRows);
+        return;
+      }
+
+      this.refreshWooStoreFilteredDashboard();
+      return;
+    }
+
     const requestId = ++this.listRequestId;
     this.listLoading.set(true);
     this.listError.set('');
@@ -609,6 +674,58 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
     });
   }
 
+  private refreshWooStoreFilteredDashboard(): void {
+    const requestId = ++this.localFilterRequestId;
+    this.listLoading.set(true);
+    this.metricsLoading.set(true);
+    this.listError.set('');
+
+    this.dashboardOrdersService.fetchAllDashboardOrders(this.buildWooStoreLocalQuery()).subscribe({
+      next: (rows) => {
+        if (requestId !== this.localFilterRequestId) {
+          return;
+        }
+
+        const filteredRows = this.applyWooStoreLocalFilters(rows);
+        this.cachedRows = filteredRows;
+        this.cachedPagination = null;
+        this.locallyFilteredRows = filteredRows;
+        this.metrics.set(this.buildMetricsFromRows(filteredRows));
+        this.applyLocalPagination(filteredRows);
+        this.metricsLoading.set(false);
+        this.listLoading.set(false);
+      },
+      error: () => {
+        if (requestId !== this.localFilterRequestId) {
+          return;
+        }
+
+        this.locallyFilteredRows = [];
+        this.orders.set([]);
+        this.metrics.set({
+          total_orders: 0,
+          delivered_orders: 0,
+          in_process_orders: 0,
+          error_orders: 0,
+          cancelled_orders: 0,
+          total_amount: 0
+        });
+        this.pagination.set({
+          current_page: 1,
+          data: [],
+          from: null,
+          last_page: 1,
+          per_page: this.perPage(),
+          to: null,
+          total: 0
+        });
+        this.listError.set('No se pudo cargar el listado de pedidos.');
+        this.metricsLoading.set(false);
+        this.listLoading.set(false);
+      }
+    });
+  }
+
   private buildQuery(includePagination: boolean = false): DashboardOrdersQuery {
     const bounds = this.getPeriodBounds();
     return {
@@ -619,8 +736,18 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
       date_to: bounds.dateTo,
       search: this.searchTerm() || undefined,
       status: this.status() || undefined,
+      store_slug: this.effectiveSource === 'woo' ? this.selectedWooStore() || undefined : undefined,
       page: includePagination ? this.page() : undefined,
       per_page: includePagination ? this.perPage() : undefined
+    };
+  }
+
+  private buildWooStoreLocalQuery(): Omit<DashboardOrdersQuery, 'page' | 'per_page'> {
+    const query = this.buildQuery();
+    return {
+      ...query,
+      search: undefined,
+      store_slug: undefined
     };
   }
 
@@ -687,8 +814,68 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
     return this.authService.getCurrentUser()?.role === UserRole.EMPAQUETADOR;
   }
 
+  private loadWooStores(): void {
+    this.wooCommerceService.listStores().subscribe({
+      next: (stores) => {
+        this.wooStores.set(
+          [...stores]
+            .filter((store) => !!String(store.slug || '').trim())
+            .sort((left, right) => left.label.localeCompare(right.label))
+        );
+      },
+      error: () => {
+        this.wooStores.set([]);
+      }
+    });
+  }
+
   private hasActiveSearch(): boolean {
     return !!this.searchTerm().trim();
+  }
+
+  private hasActiveWooStoreFilter(): boolean {
+    return this.effectiveSource === 'woo' && !!this.selectedWooStore().trim();
+  }
+
+  private applyWooStoreLocalFilters(rows: DashboardOrderRow[]): DashboardOrderRow[] {
+    const selectedStore = this.selectedWooStore().trim().toLowerCase();
+    const term = this.searchTerm().trim().toLowerCase();
+
+    return rows.filter((row) => {
+      const rowStore = String(row.store_slug || '').trim().toLowerCase();
+      if (selectedStore && rowStore !== selectedStore) {
+        return false;
+      }
+
+      if (term && !this.rowMatchesSearch(row, term)) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  private applyLocalPagination(rows: DashboardOrderRow[]): void {
+    const total = rows.length;
+    const lastPage = Math.max(1, Math.ceil(total / this.perPage()));
+    const currentPage = Math.min(this.page(), lastPage);
+    const startIndex = (currentPage - 1) * this.perPage();
+    const pagedRows = rows.slice(startIndex, startIndex + this.perPage());
+
+    if (currentPage !== this.page()) {
+      this.page.set(currentPage);
+    }
+
+    this.orders.set(pagedRows);
+    this.pagination.set({
+      current_page: currentPage,
+      data: pagedRows,
+      from: total ? startIndex + 1 : null,
+      last_page: lastPage,
+      per_page: this.perPage(),
+      to: total ? startIndex + pagedRows.length : null,
+      total
+    });
   }
 
   private getFallbackSearchRows(): DashboardOrderRow[] {
