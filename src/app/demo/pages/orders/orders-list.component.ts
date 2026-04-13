@@ -1,7 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit, effect, inject, signal } from '@angular/core';
 import {
-  DashboardOrdersScope,
   DashboardOrderRow,
   DashboardOrderSource,
   DashboardOrderStatusValue,
@@ -54,10 +53,6 @@ type DashboardPeriod = 'day' | 'week' | 'month' | 'range';
                     <i *ngIf="!loading()" class="ti ti-refresh me-1"></i>
                     Recargar
                   </button>
-                  <div class="btn-group" role="group" *ngIf="isAdminUser">
-                    <button type="button" class="btn btn-sm" [ngClass]="effectiveScope === 'all' ? 'btn-dark' : 'btn-outline-dark'" (click)="setScope('all')">Todo</button>
-                    <button type="button" class="btn btn-sm" [ngClass]="effectiveScope === 'my_queue' ? 'btn-dark' : 'btn-outline-dark'" (click)="setScope('my_queue')">Mi Cola</button>
-                  </div>
                   <div class="btn-group" role="group" *ngIf="showSourceFilter">
                     <button type="button" class="btn btn-sm" [ngClass]="source() === 'all' ? 'btn-primary' : 'btn-outline-primary'" (click)="setSource('all')">Todos</button>
                     <button type="button" class="btn btn-sm" [ngClass]="source() === 'woo' ? 'btn-primary' : 'btn-outline-primary'" (click)="setSource('woo')">WooCommerce</button>
@@ -234,7 +229,6 @@ type DashboardPeriod = 'day' | 'week' | 'month' | 'range';
 export class OrdersListComponent implements OnInit, OnDestroy {
   readonly statusOptions = getDashboardStatusOptions();
   readonly source = signal<DashboardOrderSource>('all');
-  readonly scope = signal<DashboardOrdersScope>('all');
   readonly period = signal<DashboardPeriod>('day');
   readonly status = signal<DashboardOrderStatusValue | ''>('');
   readonly selectedWooStore = signal('');
@@ -272,8 +266,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   private localFilterRequestId = 0;
 
   constructor() {
-    this.scope.set(this.isAdminUser ? 'all' : 'my_queue');
-
     effect(() => {
       const term = this.routeSearchService.ordersTerm().trim();
       this.searchTerm.set(term);
@@ -310,9 +302,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       return 'Vista operativa: el backend devuelve solo tu cola asignada.';
     }
 
-    return this.effectiveScope === 'my_queue'
-      ? 'Vista operativa: se esta mostrando solo la cola asignada al usuario actual.'
-      : '';
+    return '';
   }
 
   get showSourceFilter(): boolean {
@@ -385,12 +375,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       return;
     }
     this.selectedWooStore.set('');
-    this.page.set(1);
-    this.reload();
-  }
-
-  setScope(scope: DashboardOrdersScope): void {
-    this.scope.set(scope);
     this.page.set(1);
     this.reload();
   }
@@ -653,12 +637,12 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     return this.authService.isAdmin();
   }
 
-  get effectiveScope(): DashboardOrdersScope {
+  get effectiveScope(): 'all' | 'my_queue' {
     if (this.isEmpaquetadorUser) {
       return 'all';
     }
 
-    return this.isAdminUser ? this.scope() : 'my_queue';
+    return this.isAdminUser ? 'all' : 'my_queue';
   }
 
   get effectiveSource(): DashboardOrderSource {

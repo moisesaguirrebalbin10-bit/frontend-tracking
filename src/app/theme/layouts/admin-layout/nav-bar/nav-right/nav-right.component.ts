@@ -9,6 +9,8 @@ import { SharedModule } from 'src/app/theme/shared/shared.module';
 import { AuthService } from 'src/app/services/auth.service';
 import { UserRole } from 'src/app/models/user.model';
 import { ThemeModeService } from 'src/app/theme/shared/service/theme-mode.service';
+import { OrderNotificationItem, OrderNotificationsService } from 'src/app/services/order-notifications.service';
+import { formatDashboardDate } from 'src/app/utils/dashboard-order-ui.utils';
 
 // third party
 
@@ -31,7 +33,9 @@ import {
   CommentOutline,
   UnorderedListOutline,
   ArrowRightOutline,
-  GithubOutline
+  GithubOutline,
+  InboxOutline,
+  MailOutline
 } from '@ant-design/icons-angular/icons';
 
 @Component({
@@ -45,6 +49,7 @@ export class NavRightComponent {
   private authService = inject(AuthService);
   private router = inject(Router);
   private themeModeService = inject(ThemeModeService);
+  protected readonly notificationsService = inject(OrderNotificationsService);
 
   // public props
   styleSelectorToggle = input<boolean>();
@@ -59,6 +64,7 @@ export class NavRightComponent {
 
   // constructor
   constructor() {
+    this.notificationsService.start();
     this.windowWidth = window.innerWidth;
     this.iconService.addIcon(
       ...[
@@ -79,7 +85,9 @@ export class NavRightComponent {
         ArrowRightOutline,
         BellOutline,
         GithubOutline,
-        WalletOutline
+        WalletOutline,
+        InboxOutline,
+        MailOutline
       ]
     );
   }
@@ -142,6 +150,45 @@ export class NavRightComponent {
 
   toggleThemeMode(): void {
     this.themeModeService.toggleMode();
+  }
+
+  notificationBadgeLabel(): string {
+    const count = this.notificationsService.unreadCount();
+    return count > 99 ? '99+' : String(count);
+  }
+
+  notificationSourceLabel(notification: OrderNotificationItem): string {
+    return this.notificationsService.sourceLabel(notification);
+  }
+
+  notificationTitle(notification: OrderNotificationItem): string {
+    return notification.title;
+  }
+
+  notificationLine(notification: OrderNotificationItem): string {
+    return notification.message;
+  }
+
+  notificationTimestamp(notification: OrderNotificationItem): string {
+    return formatDashboardDate(notification.createdAt, 'Ahora');
+  }
+
+  notificationIconName(notification: OrderNotificationItem): string {
+    return notification.kind === 'new_order' ? 'inbox' : 'mail';
+  }
+
+  markAllNotificationsAsRead(): void {
+    this.notificationsService.markAllAsRead();
+  }
+
+  markNotificationAsRead(notificationId: string): void {
+    this.notificationsService.markAsRead(notificationId);
+  }
+
+  handleNotificationsOpenChange(isOpen: boolean): void {
+    if (isOpen) {
+      this.notificationsService.markDropdownOpened();
+    }
   }
 
   onLogout(): void {

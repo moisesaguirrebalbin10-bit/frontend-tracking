@@ -40,6 +40,10 @@ const routes: Routes = [
         loadComponent: () => import('./demo/pages/orders/orders-list.component').then((c) => c.OrdersListComponent)
       },
       {
+        path: 'notifications',
+        loadComponent: () => import('./demo/pages/notifications/notifications-page.component').then((c) => c.NotificationsPageComponent)
+      },
+      {
         path: 'admin/users',
         canActivate: [AdminGuard],
         loadComponent: () => import('./demo/pages/users/users-admin.component').then((c) => c.UsersAdminComponent)

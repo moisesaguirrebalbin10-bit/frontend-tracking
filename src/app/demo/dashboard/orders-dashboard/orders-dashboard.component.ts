@@ -1,7 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit, effect, inject, signal } from '@angular/core';
 import {
-  DashboardOrdersScope,
   DashboardOrderRow,
   DashboardOrderSource,
   DashboardOrderStatusValue,
@@ -67,10 +66,6 @@ type DashboardPeriod = 'day' | 'week' | 'month' | 'range';
 
         <div class="col-xl-6 col-md-6">
           <div class="d-flex align-items-center gap-2 w-100">
-            <div class="btn-group" role="group" *ngIf="isAdminUser">
-              <button type="button" class="btn" [ngClass]="effectiveScope === 'all' ? 'btn-dark' : 'btn-outline-dark'" (click)="setScope('all')">Todo</button>
-              <button type="button" class="btn" [ngClass]="effectiveScope === 'my_queue' ? 'btn-dark' : 'btn-outline-dark'" (click)="setScope('my_queue')">Mi Cola</button>
-            </div>
             <div class="btn-group flex-grow-1" role="group" *ngIf="showSourceFilter">
               <button type="button" class="btn" [ngClass]="source() === 'all' ? 'btn-primary' : 'btn-outline-primary'" (click)="setSource('all')">Todos</button>
               <button type="button" class="btn" [ngClass]="source() === 'woo' ? 'btn-primary' : 'btn-outline-primary'" (click)="setSource('woo')">WooCommerce</button>
@@ -299,7 +294,6 @@ type DashboardPeriod = 'day' | 'week' | 'month' | 'range';
 export class OrdersDashboardComponent implements OnInit, OnDestroy {
   readonly statusOptions = getDashboardStatusOptions();
   readonly source = signal<DashboardOrderSource>('all');
-  readonly scope = signal<DashboardOrdersScope>('all');
   readonly period = signal<DashboardPeriod>('day');
   readonly status = signal<DashboardOrderStatusValue | ''>('');
   readonly selectedWooStore = signal('');
@@ -347,8 +341,6 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
   private localFilterRequestId = 0;
 
   constructor() {
-    this.scope.set(this.isAdminUser ? 'all' : 'my_queue');
-
     effect(() => {
       const term = this.routeSearchService.currentTerm().trim();
       this.searchTerm.set(term);
@@ -385,9 +377,7 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
       return 'Vista operativa: el backend devuelve solo tu cola asignada.';
     }
 
-    return this.effectiveScope === 'my_queue'
-      ? 'Vista operativa: se esta mostrando solo la cola asignada al usuario actual.'
-      : '';
+    return '';
   }
 
   get showSourceFilter(): boolean {
@@ -456,12 +446,6 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
       return;
     }
     this.selectedWooStore.set('');
-    this.page.set(1);
-    this.refreshAll();
-  }
-
-  setScope(scope: DashboardOrdersScope): void {
-    this.scope.set(scope);
     this.page.set(1);
     this.refreshAll();
   }
@@ -794,12 +778,12 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
     return this.authService.isAdmin();
   }
 
-  get effectiveScope(): DashboardOrdersScope {
+  get effectiveScope(): 'all' | 'my_queue' {
     if (this.isEmpaquetadorUser) {
       return 'all';
     }
 
-    return this.isAdminUser ? this.scope() : 'my_queue';
+    return this.isAdminUser ? 'all' : 'my_queue';
   }
 
   get effectiveSource(): DashboardOrderSource {
@@ -902,13 +886,15 @@ export class OrdersDashboardComponent implements OnInit, OnDestroy {
   }
 
   private buildMetricsFromRows(rows: DashboardOrderRow[]): DashboardOrdersMetrics {
+    const facturableStatuses = new Set(['en_proceso', 'empaquetado', 'despachado', 'en_camino', 'entregado']);
+
     return {
       total_orders: rows.length,
       delivered_orders: rows.filter((row) => row.status.value === 'entregado').length,
       in_process_orders: rows.filter((row) => ['en_proceso', 'empaquetado', 'despachado', 'en_camino'].includes(row.status.value)).length,
       error_orders: rows.filter((row) => row.status.value === 'error_en_pedido').length,
       cancelled_orders: rows.filter((row) => row.status.value === 'cancelado').length,
-      total_amount: rows.reduce((sum, row) => sum + Number(row.total || 0), 0)
+      total_amount: rows.reduce((sum, row) => sum + (facturableStatuses.has(row.status.value) ? Number(row.total || 0) : 0), 0)
     };
   }
 }

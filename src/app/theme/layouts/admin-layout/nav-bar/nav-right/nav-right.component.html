@@ -31,28 +31,45 @@
       </span>
     </button>
   </li>
-  <li class="dropdown pc-h-item" ngbDropdown>
-    <a href="javascript:" class="pc-head-link dropdown-toggle arrow-none me-0 notification-trigger" data-bs-toggle="dropdown" ngbDropdownToggle>
+  <li class="dropdown pc-h-item" ngbDropdown (openChange)="handleNotificationsOpenChange($event)">
+    <a href="javascript:" class="pc-head-link dropdown-toggle arrow-none me-0 notification-trigger" [class.has-pending]="notificationsService.unopenedCount() > 0" data-bs-toggle="dropdown" ngbDropdownToggle>
       <i antIcon type="bell" theme="outline"></i>
+      <span class="pc-h-badge bg-danger text-white" *ngIf="notificationsService.unreadCount() > 0">{{ notificationBadgeLabel() }}</span>
     </a>
     <div class="dropdown-menu dropdown-notification dropdown-menu-end pc-h-dropdown" ngbDropdownMenu>
       <div class="dropdown-header d-flex align-items-center justify-content-between">
         <h5 class="m-0">Notificaciones</h5>
-        <a class="bg-transparent"><i class="text-success d-flex f-20" antIcon theme="outline" type="check-circle"></i></a>
+        <a class="bg-transparent" href="javascript:" (click)="markAllNotificationsAsRead()" [class.disabled]="notificationsService.unreadCount() === 0"><i class="text-success d-flex f-20" antIcon theme="outline" type="check-circle"></i></a>
       </div>
       <div class="dropdown-divider mb-0"></div>
-      <ng-scrollbar style="min-height: 280px" visibility="hover">
+      <ng-scrollbar class="notification-scroll" visibility="hover">
         <div class="dropdown-header p-0 text-wrap header-notification-scroll">
           <div class="list-group list-group-flush w-100">
-            <div class="text-center text-muted py-4">
+            <button type="button" class="list-group-item list-group-item-action notification-item" *ngFor="let notification of notificationsService.latestNotifications()" [class.is-unread]="!notification.readAt" (click)="markNotificationAsRead(notification.id)">
+              <div class="notification-item-row">
+                <div class="notification-item-icon" [class.is-large-icon]="notification.kind === 'new_order' || notification.kind === 'status_change'">
+                  <i antIcon [type]="notificationIconName(notification)" theme="outline"></i>
+                </div>
+                <div class="notification-item-content">
+                  <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
+                    <strong>{{ notificationTitle(notification) }}</strong>
+                    <span class="badge" [ngClass]="notification.readAt ? 'text-bg-secondary' : 'text-bg-success'">{{ notification.readAt ? 'Vista' : 'Nueva' }}</span>
+                  </div>
+                  <div class="small text-muted mb-1">{{ notificationLine(notification) }}</div>
+                  <div class="small text-muted">{{ notificationTimestamp(notification) }}</div>
+                </div>
+              </div>
+            </button>
+            <div class="text-center text-muted py-4" *ngIf="notificationsService.latestNotifications().length === 0">
               No hay notificaciones por ahora.
             </div>
           </div>
         </div>
       </ng-scrollbar>
       <div class="dropdown-divider mt-0"></div>
-      <div class="text-center py-2">
-        <a href="javascript:" class="link-primary">Marcar todas como leidas</a>
+      <div class="d-flex justify-content-between align-items-center px-3 py-2 gap-2 flex-wrap">
+        <a href="javascript:" class="link-primary" (click)="markAllNotificationsAsRead()">Marcar todas como vistas</a>
+        <a routerLink="/notifications" class="link-primary">Ver Todas</a>
       </div>
     </div>
   </li>

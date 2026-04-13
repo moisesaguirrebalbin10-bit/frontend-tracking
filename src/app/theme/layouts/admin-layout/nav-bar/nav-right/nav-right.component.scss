@@ -106,12 +106,118 @@
 }
 
 .notification-trigger {
-	background: rgba(148, 163, 184, 0.2);
+	position: relative;
+	background: transparent;
+	border: 0;
+	box-shadow: none;
+}
+
+.notification-trigger.has-pending {
+	color: #38bdf8;
+}
+
+.notification-trigger i[antIcon] {
+	font-size: 18px;
+}
+
+.notification-trigger .pc-h-badge {
+	right: -2px;
+	width: 18px;
+	min-width: 18px;
+	height: 18px;
+	padding: 0;
+	border-radius: 50%;
+	font-size: 0.52rem;
+	line-height: 1;
+	letter-spacing: -0.02em;
+}
+
+.notification-scroll {
+	min-height: 280px;
+	max-height: 420px;
+	display: block;
+}
+
+.notification-item {
+	border: 0;
+	border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+	padding: 0.85rem 1rem;
+	text-align: left;
+	background: transparent;
+}
+
+.notification-item-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+}
+
+.notification-item-icon {
+	width: 18px;
+	min-width: 18px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding-top: 0.1rem;
+	color: #38bdf8;
+}
+
+.notification-item-icon i {
+	font-size: 0.9rem;
+}
+
+.notification-item-icon.is-large-icon i {
+	font-size: 2.2rem;
+	line-height: 1;
+}
+
+.notification-item-icon.is-large-icon {
+	width: 32px;
+	min-width: 32px;
+}
+
+.notification-item-content {
+	flex: 1;
+	min-width: 0;
+}
+
+.notification-item.is-unread {
+	background: rgba(37, 99, 235, 0.05);
+}
+
+.notification-item:last-child {
+	border-bottom: 0;
+}
+
+.notification-item:hover,
+.notification-item:focus {
+	background: rgba(37, 99, 235, 0.1);
 }
 
 :host-context(body.dark-mode) .notification-trigger {
-	background: #22262d;
-	border: 1px solid #2e333b;
+	background: transparent;
+	border: 0;
+}
+
+:host-context(body.dark-mode) .notification-trigger.has-pending {
+	color: #67e8f9;
+}
+
+:host-context(body.dark-mode) .notification-item {
+	border-bottom-color: rgba(71, 85, 105, 0.35);
+}
+
+:host-context(body.dark-mode) .notification-item.is-unread {
+	background: rgba(14, 165, 233, 0.12);
+}
+
+:host-context(body.dark-mode) .notification-item-icon {
+	color: #7dd3fc;
+}
+
+:host-context(body.dark-mode) .notification-item:hover,
+:host-context(body.dark-mode) .notification-item:focus {
+	background: rgba(14, 165, 233, 0.16);
 }
 
 :host-context(body.dark-mode) .dropdown-user-profile .drp-tabs .nav-link {
@@ -133,6 +239,6 @@
 }
 
 :host-context(body.light-mode) .notification-trigger {
-	background: #e9eef6;
-	border: 1px solid #d6deea;
+	background: transparent;
+	border: 0;
 }

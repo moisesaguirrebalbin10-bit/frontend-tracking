@@ -34,3 +34,33 @@
     </div>
   </div>
 </footer>
+
+<div class="new-orders-toast-card" [class.is-leaving]="notificationsService.isNewOrdersToastLeaving()" *ngIf="notificationsService.newOrdersToast() as newOrdersToast" role="status" aria-live="polite" aria-atomic="true">
+  <div class="new-orders-toast-body">
+    <button type="button" class="new-orders-toast-close" aria-label="Cerrar aviso" (click)="notificationsService.dismissNewOrdersToast()">&times;</button>
+    <div class="toast-card-row">
+      <div class="toast-card-icon is-orders">
+        <i antIcon type="inbox" theme="outline"></i>
+      </div>
+      <div class="toast-card-content">
+        <div class="new-orders-toast-title">{{ newOrdersToast.title }}</div>
+        <div class="new-orders-toast-message">{{ newOrdersToast.message }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="admin-activity-toast-card" [class.is-leaving]="notificationsService.isAdminActivityToastLeaving()" *ngIf="notificationsService.adminActivityToast() as adminActivityToast" role="status" aria-live="polite" aria-atomic="true">
+  <div class="admin-activity-toast-body" [ngClass]="adminActivityToast.tone === 'danger' ? 'is-danger' : 'is-success'">
+    <button type="button" class="admin-activity-toast-close" aria-label="Cerrar aviso" (click)="notificationsService.dismissAdminActivityToast()">&times;</button>
+    <div class="toast-card-row">
+      <div class="toast-card-icon" [ngClass]="adminActivityToast.tone === 'danger' ? 'is-danger' : 'is-success'">
+        <i antIcon [type]="adminToastIconType(adminActivityToast.tone)" theme="outline"></i>
+      </div>
+      <div class="toast-card-content">
+        <div class="admin-activity-toast-title">{{ adminActivityToast.title }}</div>
+        <div class="admin-activity-toast-message">{{ adminActivityToast.message }}</div>
+      </div>
+    </div>
+  </div>
+</div>
